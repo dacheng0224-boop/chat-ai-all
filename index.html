@@ -907,6 +907,14 @@
           <input type="password" id="api-key" placeholder="sk-..." autocomplete="off" />
         </div>
         <div class="form-group">
+          <label for="connection-mode">API 连接方式</label>
+          <select id="connection-mode">
+            <option value="direct">直连中转站（推荐，避免约 30 秒 504）</option>
+            <option value="proxy">经本站代理（本地 serve.py / 中转站禁止跨域时用）</option>
+          </select>
+          <p class="form-hint">在线版约 20–30 秒后出现 504，是因为 Vercel 代理超时。请选「直连」；若出现 Failed to fetch 再改回「经本站代理」。</p>
+        </div>
+        <div class="form-group">
           <label for="max-tokens-mode">最大输出长度</label>
           <div class="form-row-inline">
             <select id="max-tokens-mode">
@@ -977,7 +985,8 @@
           maxTokensMode: 'max',
           maxTokensCustom: 8192,
           contextMode: 'all',
-          contextRounds: 30
+          contextRounds: 30,
+          connectionMode: 'direct'
         },
         sessions: [],
         activeSessionId: null,
@@ -1013,13 +1022,24 @@
       return window.location.protocol === 'file:';
     }
 
-    function shouldUseHostedProxy() {
+    function isLocalHost() {
+      const h = window.location.hostname;
+      return h === 'localhost' || h === '127.0.0.1';
+    }
+
+    function getConnectionMode() {
+      const mode = state.settings.connectionMode;
+      if (mode === 'direct' || mode === 'proxy') return mode;
+      return isLocalHost() ? 'proxy' : 'direct';
+    }
+
+    function canUseSiteProxy() {
       return !isFileProtocol() &&
         (window.location.protocol === 'http:' || window.location.protocol === 'https:');
     }
 
     function resolveApiRequest(baseUrl) {
-      if (shouldUseHostedProxy()) {
+      if (getConnectionMode() === 'proxy' && canUseSiteProxy()) {
         return {
           url: `${window.location.origin}/api/chat/completions`,
           extraHeaders: { 'X-Target-Base-Url': baseUrl }
@@ -1031,13 +1051,23 @@
       };
     }
 
+    function formatHttpError(status, fallback) {
+      if (status === 504) {
+        return '504 网关超时：本站代理约 30 秒会断开。请在设置 → API 连接方式 改为「直连中转站」。';
+      }
+      return fallback || `请求失败 (${status})`;
+    }
+
     function parseFetchError(err) {
       const msg = err?.message || '';
       if (msg === 'Failed to fetch' || err instanceof TypeError) {
         if (isFileProtocol()) {
           return '无法连接 API：请勿双击 HTML。请打开已部署的在线链接，或运行 serve.py 后用 http://127.0.0.1:8080 访问。';
         }
-        return '无法连接 API（Failed to fetch）。请确认通过在线链接或 serve.py 访问；并检查 Base URL、API Key、网络/VPN。';
+        if (getConnectionMode() === 'direct') {
+          return '无法连接 API（Failed to fetch）。中转站可能未允许浏览器跨域，请在设置中改为「经本站代理」；或检查 Base URL、网络/VPN。';
+        }
+        return '无法连接 API（Failed to fetch）。请检查 Base URL、API Key、网络/VPN。';
       }
       return msg || '发送失败';
     }
@@ -1413,13 +1443,14 @@
       }
 
       if (!response.ok) {
-        let errText = `请求失败 (${response.status})`;
+        let errText = formatHttpError(response.status);
         try {
           const errJson = await response.json();
           errText = errJson.error?.message || errJson.message || errText;
         } catch (_) {
           try { errText = await response.text() || errText; } catch (_) {}
         }
+        if (response.status === 504) errText = formatHttpError(504);
         throw new Error(errText);
       }
 
@@ -1752,9 +1783,11 @@
         maxTokensCustom: state.settings.maxTokensCustom || 8192,
         contextMode: state.settings.contextMode || 'all',
         contextRounds: state.settings.contextRounds || 30,
+        connectionMode: getConnectionMode(),
       };
       document.getElementById('base-url').value = settingsDraft.baseUrl;
       document.getElementById('api-key').value = settingsDraft.apiKey;
+      document.getElementById('connection-mode').value = settingsDraft.connectionMode;
       document.getElementById('max-tokens-mode').value = settingsDraft.maxTokensMode;
       document.getElementById('max-tokens-custom').value = settingsDraft.maxTokensCustom;
       document.getElementById('context-mode').value = settingsDraft.contextMode;
@@ -1820,6 +1853,7 @@
       state.settings.maxTokensCustom = parseInt(document.getElementById('max-tokens-custom').value, 10) || 8192;
       state.settings.contextMode = document.getElementById('context-mode').value;
       state.settings.contextRounds = parseInt(document.getElementById('context-rounds').value, 10) || 30;
+      state.settings.connectionMode = document.getElementById('connection-mode').value;
 
       saveState();
       closeSettings();
