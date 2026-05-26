@@ -757,6 +757,48 @@
 
     .btn-primary:hover { filter: brightness(1.08); }
 
+    .btn-test-connection {
+      width: 100%;
+      margin-top: 4px;
+      padding: 10px 14px;
+      background: transparent;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .btn-test-connection:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn-test-connection:disabled { opacity: 0.5; cursor: wait; }
+
+    .connection-test-result {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      display: none;
+    }
+
+    .connection-test-result.visible { display: block; }
+    .connection-test-result.ok {
+      background: rgba(129, 201, 149, 0.12);
+      border: 1px solid rgba(129, 201, 149, 0.35);
+      color: #81c995;
+    }
+    .connection-test-result.fail {
+      background: rgba(242, 139, 130, 0.12);
+      border: 1px solid rgba(242, 139, 130, 0.35);
+      color: #f28b82;
+    }
+
     .error-toast {
       position: fixed;
       bottom: 100px;
@@ -909,10 +951,14 @@
         <div class="form-group">
           <label for="connection-mode">API 连接方式</label>
           <select id="connection-mode">
-            <option value="direct">直连中转站（推荐，避免约 30 秒 504）</option>
-            <option value="proxy">经本站代理（本地 serve.py / 中转站禁止跨域时用）</option>
+            <option value="direct">直连中转站（需中转站允许跨域）</option>
+            <option value="custom">自定义代理（推荐在线版长回复）</option>
+            <option value="proxy">经 Vercel 本站代理（易 504，不推荐）</option>
           </select>
-          <p class="form-hint">在线版约 20–30 秒后出现 504，是因为 Vercel 代理超时。请选「直连」；若出现 Failed to fetch 再改回「经本站代理」。</p>
+          <input type="url" id="custom-proxy-url" placeholder="https://你的-worker.workers.dev" style="display:none;margin-top:8px;width:100%;padding:10px 12px;background:var(--input-bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;" />
+          <p class="form-hint" id="connection-hint">在线版长回复请用「自定义代理」：把项目里的 cloudflare-worker.js 部署到 Cloudflare Workers，填入 Worker 地址。</p>
+          <button type="button" class="btn-test-connection" id="btn-test-connection">测试 API 连接</button>
+          <div class="connection-test-result" id="connection-test-result"></div>
         </div>
         <div class="form-group">
           <label for="max-tokens-mode">最大输出长度</label>
@@ -986,7 +1032,8 @@
           maxTokensCustom: 8192,
           contextMode: 'all',
           contextRounds: 30,
-          connectionMode: 'direct'
+          connectionMode: 'custom',
+          customProxyUrl: ''
         },
         sessions: [],
         activeSessionId: null,
@@ -1027,33 +1074,168 @@
       return h === 'localhost' || h === '127.0.0.1';
     }
 
-    function getConnectionMode() {
-      const mode = state.settings.connectionMode;
-      if (mode === 'direct' || mode === 'proxy') return mode;
-      return isLocalHost() ? 'proxy' : 'direct';
-    }
-
     function canUseSiteProxy() {
       return !isFileProtocol() &&
         (window.location.protocol === 'http:' || window.location.protocol === 'https:');
     }
 
-    function resolveApiRequest(baseUrl) {
-      if (getConnectionMode() === 'proxy' && canUseSiteProxy()) {
+    function getConnectionMode() {
+      const mode = state.settings.connectionMode;
+      if (mode === 'direct' || mode === 'proxy' || mode === 'custom') return mode;
+      return isLocalHost() ? 'proxy' : 'custom';
+    }
+
+    function validateBaseUrl(baseUrl) {
+      if (!baseUrl) return '请填写 Base URL';
+      if (window.location.protocol === 'https:' && baseUrl.startsWith('http://')) {
+        return 'Base URL 必须是 HTTPS（当前页面为 HTTPS，不能请求 HTTP 接口）';
+      }
+      return null;
+    }
+
+    function normalizeProxyUrl(url) {
+      if (!url) return '';
+      return url.trim().replace(/\/+$/, '');
+    }
+
+    function resolveApiRequestForMode(baseUrl, mode, customProxyUrl) {
+      const baseErr = validateBaseUrl(baseUrl);
+      if (baseErr) throw new Error(baseErr);
+
+      if (mode === 'custom') {
+        const proxy = normalizeProxyUrl(customProxyUrl || state.settings.customProxyUrl);
+        if (!proxy) throw new Error('请填写自定义代理地址（Cloudflare Worker 或 serve.py 公网地址）');
+        const path = proxy.includes('chat/completions') ? proxy : `${proxy}/api/chat/completions`;
+        return { url: path, extraHeaders: { 'X-Target-Base-Url': baseUrl }, mode: 'custom' };
+      }
+      if (mode === 'proxy' && canUseSiteProxy()) {
         return {
           url: `${window.location.origin}/api/chat/completions`,
-          extraHeaders: { 'X-Target-Base-Url': baseUrl }
+          extraHeaders: { 'X-Target-Base-Url': baseUrl },
+          mode: 'proxy'
         };
       }
       return {
         url: `${baseUrl}/chat/completions`,
-        extraHeaders: {}
+        extraHeaders: {},
+        mode: 'direct'
       };
+    }
+
+    function resolveApiRequest(baseUrl) {
+      return resolveApiRequestForMode(baseUrl, getConnectionMode(), state.settings.customProxyUrl);
+    }
+
+    function updateConnectionFieldsVisibility() {
+      const mode = document.getElementById('connection-mode').value;
+      const custom = document.getElementById('custom-proxy-url');
+      const hint = document.getElementById('connection-hint');
+      custom.style.display = mode === 'custom' ? 'block' : 'none';
+      const hints = {
+        direct: `直连：中转站须允许来源 ${window.location.origin} 跨域（CORS），否则 Failed to fetch。`,
+        custom: '自定义代理：部署 cloudflare-worker.js 到 Cloudflare Workers，填入 Worker 根地址。本地可用 http://127.0.0.1:8080。',
+        proxy: 'Vercel 本站代理约 20–30 秒会 504，仅适合极快响应；长回复请用自定义代理。',
+      };
+      hint.textContent = hints[mode] || hints.custom;
+    }
+
+    async function testApiConnection(modeOverride) {
+      const baseUrl = normalizeBaseUrl(document.getElementById('base-url').value.trim());
+      const apiKey = document.getElementById('api-key').value.trim();
+      const customProxy = normalizeProxyUrl(document.getElementById('custom-proxy-url').value.trim());
+      const models = settingsDraft?.models?.length ? settingsDraft.models : state.settings.models;
+      const modelId = models.find(m => m.modelId?.trim())?.modelId?.trim();
+      const mode = modeOverride || document.getElementById('connection-mode').value;
+
+      if (!baseUrl || !apiKey) return { mode, ok: false, text: '请先填写 Base URL 和 API Key' };
+      if (!modelId) return { mode, ok: false, text: '请先添加至少一个模型 ID' };
+      const baseErr = validateBaseUrl(baseUrl);
+      if (baseErr) return { mode, ok: false, text: baseErr };
+
+      let req;
+      try {
+        req = resolveApiRequestForMode(baseUrl, mode, customProxy);
+      } catch (e) {
+        return { mode, ok: false, text: e.message };
+      }
+
+      const start = Date.now();
+      try {
+        const resp = await fetch(req.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            ...req.extraHeaders
+          },
+          body: JSON.stringify({
+            model: modelId,
+            messages: [{ role: 'user', content: 'ping' }],
+            stream: false,
+            max_tokens: 5
+          }),
+          signal: AbortSignal.timeout(90000)
+        });
+        const ms = Date.now() - start;
+        const body = await resp.text();
+        if (!resp.ok) {
+          let detail = body.slice(0, 300);
+          try { detail = JSON.parse(body).error?.message || detail; } catch (_) {}
+          if (resp.status === 504) {
+            detail = '504 超时（Vercel 代理约 30 秒限制）→ 请改用「自定义代理」';
+          }
+          return { mode, ok: false, text: `[${mode}] 失败 HTTP ${resp.status}（${ms}ms）\n${detail}` };
+        }
+        return { mode, ok: true, text: `[${mode}] 成功（${ms}ms）` };
+      } catch (e) {
+        const ms = Date.now() - start;
+        let msg = e.message || '未知错误';
+        if (msg === 'Failed to fetch' && mode === 'direct') {
+          msg = `Failed to fetch：中转站未允许 ${window.location.origin} 跨域。请改「自定义代理」，或在中转站配置 CORS。`;
+        }
+        return { mode, ok: false, text: `[${mode}] ${msg}（${ms}ms）` };
+      }
+    }
+
+    async function runConnectionTests() {
+      const btn = document.getElementById('btn-test-connection');
+      const box = document.getElementById('connection-test-result');
+      btn.disabled = true;
+      btn.textContent = '测试中…';
+      box.className = 'connection-test-result visible';
+      box.textContent = '正在测试，请稍候…';
+
+      const selected = document.getElementById('connection-mode').value;
+      const modes = selected === 'custom'
+        ? ['custom', 'direct']
+        : [selected, selected === 'direct' ? 'custom' : 'direct'];
+
+      const seen = new Set();
+      const lines = [`页面来源：${window.location.origin}`, ''];
+      let anyOk = false;
+
+      for (const mode of modes) {
+        if (seen.has(mode)) continue;
+        seen.add(mode);
+        const r = await testApiConnection(mode);
+        lines.push(r.text);
+        if (r.ok) anyOk = true;
+        lines.push('');
+      }
+
+      if (!anyOk) {
+        lines.push('建议：部署 cloudflare-worker.js → 选「自定义代理」填入 Worker 地址。');
+      }
+
+      box.textContent = lines.join('\n').trim();
+      box.classList.add(anyOk ? 'ok' : 'fail');
+      btn.disabled = false;
+      btn.textContent = '测试 API 连接';
     }
 
     function formatHttpError(status, fallback) {
       if (status === 504) {
-        return '504 网关超时：本站代理约 30 秒会断开。请在设置 → API 连接方式 改为「直连中转站」。';
+        return '504 网关超时：Vercel 代理约 30 秒限制。请改用设置里的「自定义代理」（Cloudflare Worker）。';
       }
       return fallback || `请求失败 (${status})`;
     }
@@ -1065,7 +1247,10 @@
           return '无法连接 API：请勿双击 HTML。请打开已部署的在线链接，或运行 serve.py 后用 http://127.0.0.1:8080 访问。';
         }
         if (getConnectionMode() === 'direct') {
-          return '无法连接 API（Failed to fetch）。中转站可能未允许浏览器跨域，请在设置中改为「经本站代理」；或检查 Base URL、网络/VPN。';
+          return `无法连接（Failed to fetch）。中转站须允许 ${window.location.origin} 跨域；或改用「自定义代理」。`;
+        }
+        if (getConnectionMode() === 'custom') {
+          return '无法连接自定义代理。请检查代理地址是否可访问、是否已部署 cloudflare-worker.js。';
         }
         return '无法连接 API（Failed to fetch）。请检查 Base URL、API Key、网络/VPN。';
       }
@@ -1784,10 +1969,13 @@
         contextMode: state.settings.contextMode || 'all',
         contextRounds: state.settings.contextRounds || 30,
         connectionMode: getConnectionMode(),
+        customProxyUrl: state.settings.customProxyUrl || '',
       };
       document.getElementById('base-url').value = settingsDraft.baseUrl;
       document.getElementById('api-key').value = settingsDraft.apiKey;
       document.getElementById('connection-mode').value = settingsDraft.connectionMode;
+      document.getElementById('custom-proxy-url').value = settingsDraft.customProxyUrl;
+      updateConnectionFieldsVisibility();
       document.getElementById('max-tokens-mode').value = settingsDraft.maxTokensMode;
       document.getElementById('max-tokens-custom').value = settingsDraft.maxTokensCustom;
       document.getElementById('context-mode').value = settingsDraft.contextMode;
@@ -1854,6 +2042,7 @@
       state.settings.contextMode = document.getElementById('context-mode').value;
       state.settings.contextRounds = parseInt(document.getElementById('context-rounds').value, 10) || 30;
       state.settings.connectionMode = document.getElementById('connection-mode').value;
+      state.settings.customProxyUrl = normalizeProxyUrl(document.getElementById('custom-proxy-url').value);
 
       saveState();
       closeSettings();
@@ -1889,6 +2078,9 @@
     document.getElementById('btn-send').addEventListener('click', sendMessage);
     document.getElementById('btn-stop').addEventListener('click', stopGeneration);
     document.getElementById('btn-export').addEventListener('click', exportCurrentSessionToWord);
+
+    document.getElementById('connection-mode').addEventListener('change', updateConnectionFieldsVisibility);
+    document.getElementById('btn-test-connection').addEventListener('click', runConnectionTests);
 
     document.getElementById('max-tokens-mode').addEventListener('change', updateMaxTokensCustomVisibility);
     document.getElementById('context-mode').addEventListener('change', updateContextRoundsVisibility);
