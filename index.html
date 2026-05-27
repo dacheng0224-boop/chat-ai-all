@@ -99,7 +99,6 @@
       color: var(--text-secondary);
       transition: background 0.15s, color 0.15s;
       position: relative;
-      group: session;
     }
 
     .session-item:hover { background: var(--sidebar-hover); color: var(--text); }
@@ -1174,7 +1173,7 @@
             stream: false,
             max_tokens: 5
           }),
-          signal: AbortSignal.timeout(90000)
+          signal: AbortSignal.timeout(25000)
         });
         const ms = Date.now() - start;
         const body = await resp.text();
@@ -1190,6 +1189,9 @@
       } catch (e) {
         const ms = Date.now() - start;
         let msg = e.message || '未知错误';
+        if (e.name === 'AbortError' || e.name === 'TimeoutError') {
+          msg = '连接超时（25s）：上游未及时响应。请检查 Worker 日志和中转站可用性。';
+        }
         if (msg === 'Failed to fetch' && mode === 'direct') {
           msg = `Failed to fetch：中转站未允许 ${window.location.origin} 跨域。请改「自定义代理」，或在中转站配置 CORS。`;
         }

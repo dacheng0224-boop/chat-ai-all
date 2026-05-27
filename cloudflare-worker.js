@@ -35,14 +35,22 @@ export default {
 
     const auth = request.headers.get('Authorization') || '';
     try {
-      const upstream = await fetch(`${targetBase}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: auth,
-        },
-        body: request.body,
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort('UPSTREAM_TIMEOUT'), 25000);
+      let upstream;
+      try {
+        upstream = await fetch(`${targetBase}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: auth,
+          },
+          body: request.body,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       const headers = new Headers(cors);
       const ct = upstream.headers.get('content-type');
@@ -51,6 +59,17 @@ export default {
 
       return new Response(upstream.body, { status: upstream.status, headers });
     } catch (e) {
+      if (e?.name === 'AbortError') {
+        return Response.json(
+          {
+            error: {
+              message:
+                '自定义代理连接上游超时（25s）。通常是中转站/模型首字过慢或上游不通，请检查中转站连通性。',
+            },
+          },
+          { status: 504, headers: cors }
+        );
+      }
       return Response.json(
         { error: { message: `无法连接中转站：${e.message}` } },
         { status: 502, headers: cors }
