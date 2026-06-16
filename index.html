@@ -175,6 +175,25 @@
 
     .btn-settings:hover { background: var(--sidebar-hover); color: var(--text); }
 
+    .btn-profile {
+      margin-top: 8px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: transparent;
+      border: none;
+      border-radius: var(--radius);
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .btn-profile:hover,
+    .btn-profile.active { background: var(--sidebar-hover); color: var(--text); }
+
     /* Main */
     .main {
       flex: 1;
@@ -510,6 +529,17 @@
       margin-bottom: 8px;
     }
 
+    .mode-select {
+      padding: 6px 10px;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
+    }
+
     .model-select {
       flex: 1;
       max-width: 220px;
@@ -524,6 +554,24 @@
     }
 
     .model-select option { background: var(--bg-elevated); }
+
+    .image-options {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .image-options.visible { display: flex; }
+    .image-options select {
+      padding: 6px 10px;
+      background: rgba(0,0,0,0.25);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
+    }
 
     .input-row {
       display: flex;
@@ -582,6 +630,98 @@
       color: var(--text-secondary);
       margin-top: 8px;
       text-align: center;
+    }
+
+    .image-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+    }
+    .image-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .image-card img {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      display: block;
+      cursor: zoom-in;
+    }
+    .image-card-actions {
+      display: flex;
+      gap: 6px;
+      padding: 8px;
+    }
+    .image-card-actions button {
+      flex: 1;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .gallery-page {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .gallery-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .gallery-title { font-size: 20px; font-weight: 500; }
+    .gallery-empty {
+      color: var(--text-secondary);
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 22px;
+      text-align: center;
+    }
+
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.75);
+      z-index: 120;
+      padding: 20px;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox-inner {
+      max-width: min(1200px, 95vw);
+      max-height: 90vh;
+    }
+    .lightbox-img {
+      display: block;
+      max-width: 100%;
+      max-height: 80vh;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.22);
+    }
+    .lightbox-actions {
+      margin-top: 10px;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+    .lightbox-actions button {
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
     }
 
     /* Modal */
@@ -881,6 +1021,12 @@
           </svg>
           设置
         </button>
+        <button type="button" class="btn-profile" id="btn-profile">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/>
+          </svg>
+          个人中心
+        </button>
       </div>
     </aside>
 
@@ -905,8 +1051,27 @@
       <div class="input-area">
         <div class="input-wrapper">
           <div class="input-toolbar">
+            <select class="mode-select" id="chat-mode-select" title="选择模式">
+              <option value="chat">对话模式</option>
+              <option value="image">文生图模式</option>
+            </select>
             <select class="model-select" id="model-select" title="选择模型">
               <option value="">请先配置模型</option>
+            </select>
+          </div>
+          <div class="image-options" id="image-options">
+            <select id="image-size">
+              <option value="1024x1024">1:1 (1024x1024)</option>
+              <option value="1536x1024">3:2 横图</option>
+              <option value="1024x1536">2:3 竖图</option>
+              <option value="1792x1024">16:9 横图</option>
+              <option value="1024x1792">9:16 竖图</option>
+            </select>
+            <select id="image-count">
+              <option value="1">生成 1 张</option>
+              <option value="2">生成 2 张</option>
+              <option value="3">生成 3 张</option>
+              <option value="4">生成 4 张</option>
             </select>
           </div>
           <div class="input-row">
@@ -990,6 +1155,14 @@
           <div id="models-editor"></div>
           <button type="button" class="btn-add-model" id="btn-add-model">+ 添加模型</button>
         </div>
+        <div class="models-section" style="margin-top:16px;">
+          <h3>生图模型列表</h3>
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px;">
+            文生图模式使用该列表，模型 ID 需支持 /images/generations。
+          </p>
+          <div id="image-models-editor"></div>
+          <button type="button" class="btn-add-model" id="btn-add-image-model">+ 添加生图模型</button>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn-secondary" id="btn-cancel-settings">取消</button>
@@ -999,13 +1172,22 @@
   </div>
 
   <div class="error-toast" id="error-toast"></div>
+  <div class="lightbox" id="image-lightbox">
+    <div class="lightbox-inner">
+      <img class="lightbox-img" id="lightbox-img" alt="预览图" />
+      <div class="lightbox-actions">
+        <button type="button" id="lightbox-download">下载图片</button>
+        <button type="button" id="lightbox-close">关闭</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const STORAGE_KEY = 'chat-ai-app-v1';
 
     // ========== 部署默认配置（同事首次打开自动带上模型列表）==========
     const BUILD_DEFAULTS = {
-      version: 1,
+      version: 2,
       connectionMode: 'proxy',
       customProxyUrl: '',
       models: [
@@ -1013,6 +1195,10 @@
         { name: 'Gemini 3.1 Pro Preview', modelId: 'google/gemini-3.1-pro-preview' },
         { name: 'GPT 5.5', modelId: 'openai/gpt-5.5' },
         { name: 'DeepSeek V4-Pro', modelId: 'deepseek/deepseek-v4-pro' }
+      ],
+      imageModels: [
+        { name: 'GPT Image 2', modelId: 'openai/gpt-image-2' },
+        { name: 'Flux 2 Max', modelId: 'black-forest-labs/flux-2-max' }
       ]
     };
     // Base URL、API Key 由每人自行填写。
@@ -1032,6 +1218,8 @@
     let state = loadState();
     let abortController = null;
     let isStreaming = false;
+    let activeView = 'chat';
+    let currentPreviewImage = null;
 
     const MAX_TOKENS_LARGE = 65536;
 
@@ -1043,17 +1231,29 @@
       }));
     }
 
+    function buildDefaultImageModels() {
+      return BUILD_DEFAULTS.imageModels.map(m => ({
+        id: uid(),
+        name: m.name,
+        modelId: m.modelId
+      }));
+    }
+
     function needsDefaultModels(settings, savedVersion) {
-      return !settings.models?.length || (savedVersion || 0) < BUILD_DEFAULTS.version;
+      const current = settings || {};
+      return !current.models?.length;
     }
 
     function applyBuildDefaults(settings, savedVersion) {
       const s = { ...settings };
       if (needsDefaultModels(s, savedVersion)) s.models = buildDefaultModels();
+      if (!s.imageModels?.length) s.imageModels = buildDefaultImageModels();
       if (!s.connectionMode) s.connectionMode = BUILD_DEFAULTS.connectionMode;
       if (!s.customProxyUrl && BUILD_DEFAULTS.customProxyUrl) {
         s.customProxyUrl = BUILD_DEFAULTS.customProxyUrl;
       }
+      if (!s.imageSize) s.imageSize = '1024x1024';
+      if (!s.imageCount) s.imageCount = 1;
       return s;
     }
 
@@ -1063,16 +1263,21 @@
           baseUrl: '',
           apiKey: '',
           models: buildDefaultModels(),
+          imageModels: buildDefaultImageModels(),
           maxTokensMode: 'max',
           maxTokensCustom: 8192,
           contextMode: 'all',
           contextRounds: 30,
           connectionMode: BUILD_DEFAULTS.connectionMode,
-          customProxyUrl: BUILD_DEFAULTS.customProxyUrl
+          customProxyUrl: BUILD_DEFAULTS.customProxyUrl,
+          imageSize: '1024x1024',
+          imageCount: 1
         }, BUILD_DEFAULTS.version),
         sessions: [],
+        gallery: [],
         activeSessionId: null,
         lastModelId: null,
+        lastImageModelId: null,
         defaultsVersion: BUILD_DEFAULTS.version
       };
     }
@@ -1170,6 +1375,30 @@
 
     function resolveApiRequest(baseUrl) {
       return resolveApiRequestForMode(baseUrl, getConnectionMode(), state.settings.customProxyUrl);
+    }
+
+    function resolveImageRequestForMode(baseUrl, mode, customProxyUrl) {
+      const baseErr = validateBaseUrl(baseUrl);
+      if (baseErr) throw new Error(baseErr);
+
+      if (mode === 'custom') {
+        const proxy = normalizeProxyUrl(customProxyUrl || state.settings.customProxyUrl);
+        if (!proxy) throw new Error('请填写自定义代理地址（Cloudflare Worker 或 serve.py 公网地址）');
+        const path = proxy.includes('images/generations') ? proxy : `${proxy}/api/images/generations`;
+        return { url: path, extraHeaders: { 'X-Target-Base-Url': baseUrl }, mode: 'custom' };
+      }
+      if (mode === 'proxy' && canUseSiteProxy()) {
+        return {
+          url: `${window.location.origin}/api/images/generations`,
+          extraHeaders: { 'X-Target-Base-Url': baseUrl },
+          mode: 'proxy'
+        };
+      }
+      return {
+        url: `${baseUrl}/images/generations`,
+        extraHeaders: {},
+        mode: 'direct'
+      };
     }
 
     function updateConnectionFieldsVisibility() {
@@ -1346,6 +1575,83 @@
       const d = document.createElement('div');
       d.textContent = str;
       return d.innerHTML;
+    }
+
+    function toDataUrl(item) {
+      if (item.url) return item.url;
+      if (item.b64) return `data:${item.mime || 'image/png'};base64,${item.b64}`;
+      return '';
+    }
+
+    function downloadImage(url, filename = 'ai-image.png') {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.rel = 'noopener';
+      a.target = '_blank';
+      a.click();
+    }
+
+    function openLightbox(url) {
+      currentPreviewImage = url;
+      const box = document.getElementById('image-lightbox');
+      const img = document.getElementById('lightbox-img');
+      img.src = url;
+      box.classList.add('open');
+    }
+
+    function closeLightbox() {
+      document.getElementById('image-lightbox').classList.remove('open');
+      document.getElementById('lightbox-img').src = '';
+      currentPreviewImage = null;
+    }
+
+    function bindImageActions(container) {
+      container.querySelectorAll('[data-preview-url]').forEach((img) => {
+        img.addEventListener('click', () => openLightbox(img.dataset.previewUrl));
+      });
+      container.querySelectorAll('[data-download-url]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          downloadImage(btn.dataset.downloadUrl, btn.dataset.downloadName || 'ai-image.png');
+        });
+      });
+      container.querySelectorAll('[data-gallery-delete-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.gallery = state.gallery.filter(item => item.id !== btn.dataset.galleryDeleteId);
+          saveState();
+          renderMessages();
+        });
+      });
+    }
+
+    function renderGallery(container) {
+      const list = [...(state.gallery || [])].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      if (!list.length) {
+        container.innerHTML = `
+          <section class="gallery-page">
+            <div class="gallery-header"><h2 class="gallery-title">个人中心 · 图库</h2></div>
+            <div class="gallery-empty">暂无图片。切换到“文生图模式”生成后会自动保存到这里。</div>
+          </section>
+        `;
+        return;
+      }
+      container.innerHTML = `
+        <section class="gallery-page">
+          <div class="gallery-header"><h2 class="gallery-title">个人中心 · 图库 (${list.length})</h2></div>
+          <div class="image-grid">
+            ${list.map((img, idx) => `
+              <div class="image-card">
+                <img src="${toDataUrl(img)}" alt="图库图片 ${idx + 1}" data-preview-url="${toDataUrl(img)}" />
+                <div class="image-card-actions">
+                  <button type="button" data-download-url="${toDataUrl(img)}" data-download-name="gallery-${img.id || idx}.png">下载</button>
+                  <button type="button" data-gallery-delete-id="${img.id || ''}">删除</button>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      `;
+      bindImageActions(container);
     }
 
     function renderMarkdown(text) {
@@ -1533,6 +1839,10 @@
 
     function renderMessages() {
       const container = document.getElementById('messages-container');
+      if (activeView === 'gallery') {
+        renderGallery(container);
+        return;
+      }
       const session = getActiveSession();
       ensureSession();
       updateChatToolbar();
@@ -1557,6 +1867,22 @@
         let body;
         if (isUser) {
           body = `<div class="message-body">${escapeHtml(msg.content)}</div>`;
+        } else if (msg.kind === 'image') {
+          body = `
+            <div class="message-body">
+              <div>${escapeHtml(msg.content || '已生成图片')}</div>
+              <div class="image-grid">
+                ${(msg.images || []).map((img, idx) => `
+                  <div class="image-card">
+                    <img src="${img.url}" alt="生成图 ${idx + 1}" data-preview-url="${img.url}" />
+                    <div class="image-card-actions">
+                      <button type="button" data-download-url="${img.url}" data-download-name="ai-image-${msg.id}-${idx + 1}.png">下载</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
         } else if (msg.streaming) {
           body = `<div class="message-body streaming">${escapeHtml(msg.content)}<span class="cursor">▋</span></div>`;
         } else {
@@ -1574,6 +1900,8 @@
         `;
       }).join('');
 
+      bindImageActions(container);
+
       scrollToBottom();
     }
 
@@ -1582,11 +1910,28 @@
       requestAnimationFrame(() => { area.scrollTop = area.scrollHeight; });
     }
 
+    function getInputMode() {
+      return document.getElementById('chat-mode-select')?.value || 'chat';
+    }
+
+    function renderInputMode() {
+      const mode = getInputMode();
+      const options = document.getElementById('image-options');
+      const input = document.getElementById('message-input');
+      options.classList.toggle('visible', mode === 'image');
+      input.placeholder = mode === 'image' ? '输入生图提示词…' : '输入消息…';
+      if (mode === 'image') {
+        document.getElementById('image-size').value = state.settings.imageSize || '1024x1024';
+        document.getElementById('image-count').value = String(state.settings.imageCount || 1);
+      }
+    }
+
     function renderModelSelect() {
+      const mode = getInputMode();
       const sel = document.getElementById('model-select');
-      const models = state.settings.models;
+      const models = mode === 'image' ? state.settings.imageModels : state.settings.models;
       if (!models.length) {
-        sel.innerHTML = '<option value="">请先在设置中添加模型</option>';
+        sel.innerHTML = `<option value="">请先在设置中添加${mode === 'image' ? '生图' : '对话'}模型</option>`;
         sel.disabled = true;
         return;
       }
@@ -1594,8 +1939,9 @@
       sel.innerHTML = models.map(m =>
         `<option value="${m.id}">${escapeHtml(m.name)}</option>`
       ).join('');
-      if (state.lastModelId && models.some(m => m.id === state.lastModelId)) {
-        sel.value = state.lastModelId;
+      const lastId = mode === 'image' ? state.lastImageModelId : state.lastModelId;
+      if (lastId && models.some(m => m.id === lastId)) {
+        sel.value = lastId;
       }
     }
 
@@ -1603,7 +1949,8 @@
       const input = document.getElementById('message-input');
       const btn = document.getElementById('btn-send');
       const hasText = input.value.trim().length > 0;
-      const hasModel = state.settings.models.length > 0;
+      const mode = getInputMode();
+      const hasModel = mode === 'image' ? state.settings.imageModels.length > 0 : state.settings.models.length > 0;
       btn.disabled = !hasText || !hasModel || isStreaming;
     }
 
@@ -1612,6 +1959,7 @@
       document.getElementById('btn-send').classList.toggle('hidden', active);
       document.getElementById('btn-stop').classList.toggle('visible', active);
       document.getElementById('message-input').disabled = active;
+      document.getElementById('chat-mode-select').disabled = active;
       document.getElementById('model-select').disabled = active;
       updateSendButton();
     }
@@ -1619,6 +1967,7 @@
     function render() {
       renderSessionsList();
       renderMessages();
+      renderInputMode();
       renderModelSelect();
       updateSendButton();
     }
@@ -1636,7 +1985,7 @@
 
     function buildApiMessages(session) {
       let msgs = session.messages
-        .filter(m => !m.streaming && m.content)
+        .filter(m => !m.streaming && m.content && m.kind !== 'image')
         .map(m => ({ role: m.role, content: m.content }));
       if (state.settings.contextMode === 'recent') {
         const rounds = Math.max(1, parseInt(state.settings.contextRounds, 10) || 30);
@@ -1721,6 +2070,68 @@
       }
     }
 
+    async function generateImages(session, prompt, model) {
+      const baseUrl = normalizeBaseUrl(state.settings.baseUrl);
+      const apiKey = state.settings.apiKey;
+      if (!baseUrl || !apiKey) throw new Error('请先在设置中填写 Base URL 和 API Key');
+      if (!model) throw new Error('请选择生图模型');
+
+      const req = resolveImageRequestForMode(baseUrl, getConnectionMode(), state.settings.customProxyUrl);
+      const size = state.settings.imageSize || '1024x1024';
+      const count = Math.max(1, Math.min(4, parseInt(state.settings.imageCount, 10) || 1));
+
+      let response;
+      try {
+        response = await fetch(req.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            ...req.extraHeaders
+          },
+          body: JSON.stringify({
+            model: model.modelId,
+            prompt,
+            size,
+            n: count
+          }),
+          signal: AbortSignal.timeout(180000)
+        });
+      } catch (err) {
+        throw new Error(parseFetchError(err));
+      }
+
+      let json = {};
+      try {
+        json = await response.json();
+      } catch (_) {}
+      if (!response.ok) {
+        const errText = json?.error?.message || formatHttpError(response.status, '生图请求失败');
+        throw new Error(errText);
+      }
+
+      const data = Array.isArray(json.data) ? json.data : [];
+      const images = data.map((item, idx) => {
+        const url = item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : '');
+        return {
+          id: uid(),
+          url,
+          b64: item.b64_json || '',
+          mime: 'image/png',
+          modelName: model.name,
+          modelId: model.modelId,
+          prompt,
+          timestamp: Date.now() + idx
+        };
+      }).filter(it => it.url);
+      if (!images.length) throw new Error('生图成功但未返回可展示图片');
+
+      state.gallery = [...(state.gallery || []), ...images];
+      saveState();
+
+      return images;
+    }
+
     function updateStreamingBubble(msg) {
       const el = document.querySelector(`.message[data-id="${msg.id}"] .message-body`);
       if (el) {
@@ -1743,14 +2154,17 @@
       const text = input.value.trim();
       if (!text || isStreaming) return;
 
+      const mode = getInputMode();
       const modelId = document.getElementById('model-select').value;
-      const model = state.settings.models.find(m => m.id === modelId);
+      const modelPool = mode === 'image' ? state.settings.imageModels : state.settings.models;
+      const model = modelPool.find(m => m.id === modelId);
       if (!model) {
-        showError('请先选择或配置模型');
+        showError(`请先选择或配置${mode === 'image' ? '生图' : '对话'}模型`);
         return;
       }
 
-      state.lastModelId = modelId;
+      if (mode === 'image') state.lastImageModelId = modelId;
+      else state.lastModelId = modelId;
       saveState();
 
       ensureSession();
@@ -1770,6 +2184,7 @@
         id: uid(),
         role: 'assistant',
         content: '',
+        kind: mode === 'image' ? 'image' : 'text',
         modelId: model.id,
         modelName: model.name,
         modelApiId: model.modelId,
@@ -1785,7 +2200,14 @@
       setStreaming(true);
 
       try {
-        await streamCompletion(session, assistantMsg, model);
+        if (mode === 'image') {
+          const images = await generateImages(session, text, model);
+          assistantMsg.images = images.map(img => ({ id: img.id, url: toDataUrl(img) }));
+          assistantMsg.content = `已生成 ${assistantMsg.images.length} 张图片`;
+          assistantMsg.streaming = false;
+        } else {
+          await streamCompletion(session, assistantMsg, model);
+        }
       } catch (err) {
         if (err.name === 'AbortError') {
           if (!assistantMsg.content) assistantMsg.content = '（已停止生成）';
@@ -2013,6 +2435,7 @@
         baseUrl: state.settings.baseUrl,
         apiKey: state.settings.apiKey,
         models: state.settings.models.map(m => ({ ...m })),
+        imageModels: (state.settings.imageModels || []).map(m => ({ ...m })),
         maxTokensMode: state.settings.maxTokensMode || 'max',
         maxTokensCustom: state.settings.maxTokensCustom || 8192,
         contextMode: state.settings.contextMode || 'all',
@@ -2032,6 +2455,7 @@
       updateMaxTokensCustomVisibility();
       updateContextRoundsVisibility();
       renderModelsEditor();
+      renderImageModelsEditor();
       document.getElementById('settings-modal').classList.add('open');
     }
 
@@ -2074,14 +2498,52 @@
       });
     }
 
+    function renderImageModelsEditor() {
+      const editor = document.getElementById('image-models-editor');
+      if (!settingsDraft.imageModels.length) {
+        editor.innerHTML = '<p style="font-size:12px;color:var(--text-secondary);">暂无生图模型，点击下方添加。</p>';
+        return;
+      }
+      editor.innerHTML = settingsDraft.imageModels.map((m, i) => `
+        <div class="model-row" data-index="${i}">
+          <input type="text" placeholder="显示名称" value="${escapeHtml(m.name)}" data-field="name" />
+          <input type="text" placeholder="模型 ID" value="${escapeHtml(m.modelId)}" data-field="modelId" />
+          <button type="button" class="btn-remove-model" data-index="${i}" aria-label="删除">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      `).join('');
+      editor.querySelectorAll('.model-row input').forEach(inp => {
+        inp.addEventListener('input', () => {
+          const row = inp.closest('.model-row');
+          const idx = +row.dataset.index;
+          settingsDraft.imageModels[idx][inp.dataset.field] = inp.value;
+        });
+      });
+      editor.querySelectorAll('.btn-remove-model').forEach(btn => {
+        btn.addEventListener('click', () => {
+          settingsDraft.imageModels.splice(+btn.dataset.index, 1);
+          renderImageModelsEditor();
+        });
+      });
+    }
+
     function saveSettings() {
       settingsDraft.baseUrl = document.getElementById('base-url').value.trim();
       settingsDraft.apiKey = document.getElementById('api-key').value.trim();
       settingsDraft.models = settingsDraft.models.filter(m => m.name.trim() && m.modelId.trim());
+      settingsDraft.imageModels = settingsDraft.imageModels.filter(m => m.name.trim() && m.modelId.trim());
 
       state.settings.baseUrl = settingsDraft.baseUrl;
       state.settings.apiKey = settingsDraft.apiKey;
       state.settings.models = settingsDraft.models.map(m => ({
+        id: m.id || uid(),
+        name: m.name.trim(),
+        modelId: m.modelId.trim()
+      }));
+      state.settings.imageModels = settingsDraft.imageModels.map(m => ({
         id: m.id || uid(),
         name: m.name.trim(),
         modelId: m.modelId.trim()
@@ -2099,7 +2561,9 @@
       render();
 
       if (!state.settings.models.length) {
-        showError('请至少添加一个模型');
+        showError('请至少添加一个对话模型');
+      } else if (!state.settings.imageModels.length) {
+        showError('请至少添加一个生图模型');
       } else if (!state.settings.baseUrl || !state.settings.apiKey) {
         showError('请填写 Base URL 和 API Key');
       }
@@ -2120,6 +2584,10 @@
       settingsDraft.models.push({ id: uid(), name: '', modelId: '' });
       renderModelsEditor();
     });
+    document.getElementById('btn-add-image-model').addEventListener('click', () => {
+      settingsDraft.imageModels.push({ id: uid(), name: '', modelId: '' });
+      renderImageModelsEditor();
+    });
 
     document.getElementById('settings-modal').addEventListener('click', (e) => {
       if (e.target.id === 'settings-modal') closeSettings();
@@ -2128,6 +2596,35 @@
     document.getElementById('btn-send').addEventListener('click', sendMessage);
     document.getElementById('btn-stop').addEventListener('click', stopGeneration);
     document.getElementById('btn-export').addEventListener('click', exportCurrentSessionToWord);
+    document.getElementById('chat-mode-select').addEventListener('change', () => {
+      renderInputMode();
+      renderModelSelect();
+      updateSendButton();
+    });
+    document.getElementById('image-size').addEventListener('change', (e) => {
+      state.settings.imageSize = e.target.value;
+      saveState();
+    });
+    document.getElementById('image-count').addEventListener('change', (e) => {
+      state.settings.imageCount = Math.max(1, Math.min(4, parseInt(e.target.value, 10) || 1));
+      saveState();
+    });
+
+    document.getElementById('btn-profile').addEventListener('click', () => {
+      activeView = activeView === 'gallery' ? 'chat' : 'gallery';
+      document.getElementById('btn-profile').classList.toggle('active', activeView === 'gallery');
+      document.getElementById('chat-toolbar').style.display = activeView === 'gallery' ? 'none' : 'flex';
+      document.querySelector('.input-area').style.display = activeView === 'gallery' ? 'none' : 'block';
+      renderMessages();
+    });
+
+    document.getElementById('lightbox-close').addEventListener('click', closeLightbox);
+    document.getElementById('image-lightbox').addEventListener('click', (e) => {
+      if (e.target.id === 'image-lightbox') closeLightbox();
+    });
+    document.getElementById('lightbox-download').addEventListener('click', () => {
+      if (currentPreviewImage) downloadImage(currentPreviewImage, `ai-image-${Date.now()}.png`);
+    });
 
     document.getElementById('connection-mode').addEventListener('change', updateConnectionFieldsVisibility);
     document.getElementById('btn-test-connection').addEventListener('click', runConnectionTests);
@@ -2150,7 +2647,8 @@
     });
 
     document.getElementById('model-select').addEventListener('change', (e) => {
-      state.lastModelId = e.target.value;
+      if (getInputMode() === 'image') state.lastImageModelId = e.target.value;
+      else state.lastModelId = e.target.value;
       saveState();
     });
 

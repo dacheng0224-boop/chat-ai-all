@@ -56,7 +56,9 @@ class ChatServlet < WEBrick::HTTPServlet::AbstractServlet
   def do_POST(req, res)
     path = req.path.split("?", 2).first
     if path.end_with?("/chat/completions") || path.start_with?("/api/chat/completions")
-      proxy_chat(req, res)
+      proxy_to(req, res, "chat/completions")
+    elsif path.end_with?("/images/generations") || path.start_with?("/api/images/generations")
+      proxy_to(req, res, "images/generations")
     else
       res.status = 404
       res["Content-Type"] = "text/plain"
@@ -81,14 +83,14 @@ class ChatServlet < WEBrick::HTTPServlet::AbstractServlet
     set_cors(res)
   end
 
-  def proxy_chat(req, res)
+  def proxy_to(req, res, upstream_path)
     target_base = (req["X-Target-Base-Url"] || "").strip.sub(%r{/+\z}, "")
     if target_base.empty?
       json_error(res, 400, "缺少请求头 X-Target-Base-Url，请在设置中填写 Base URL")
       return
     end
 
-    upstream = URI.join("#{target_base}/", "chat/completions")
+    upstream = URI.join("#{target_base}/", upstream_path)
     http = Net::HTTP.new(upstream.host, upstream.port)
     http.use_ssl = upstream.scheme == "https"
     http.read_timeout = 600

@@ -49,11 +49,14 @@ class ChatHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         if path.rstrip("/").endswith("/chat/completions") or path.startswith("/api/chat/completions"):
-            self._proxy_chat_completions()
+            self._proxy_path("/chat/completions")
+            return
+        if path.rstrip("/").endswith("/images/generations") or path.startswith("/api/images/generations"):
+            self._proxy_path("/images/generations")
             return
         self.send_error(404, "Not Found")
 
-    def _proxy_chat_completions(self):
+    def _proxy_path(self, suffix: str):
         target_base = (self.headers.get("X-Target-Base-Url") or "").strip().rstrip("/")
         if not target_base:
             self._json_error(400, "缺少请求头 X-Target-Base-Url，请在设置中填写 Base URL")
@@ -61,7 +64,7 @@ class ChatHandler(SimpleHTTPRequestHandler):
 
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length) if length else b""
-        upstream = f"{target_base}/chat/completions"
+        upstream = f"{target_base}{suffix}"
 
         headers = {"Content-Type": "application/json"}
         auth = self.headers.get("Authorization")

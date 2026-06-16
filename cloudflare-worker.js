@@ -21,9 +21,13 @@ export default {
     }
 
     const url = new URL(request.url);
-    if (request.method !== 'POST' || !url.pathname.includes('chat/completions')) {
+    if (request.method !== 'POST') {
       return new Response('Not Found', { status: 404, headers: cors });
     }
+    let upstreamPath = '';
+    if (url.pathname.includes('chat/completions')) upstreamPath = '/chat/completions';
+    if (url.pathname.includes('images/generations')) upstreamPath = '/images/generations';
+    if (!upstreamPath) return new Response('Not Found', { status: 404, headers: cors });
 
     const targetBase = (request.headers.get('X-Target-Base-Url') || '').trim().replace(/\/+$/, '');
     if (!targetBase) {
@@ -36,10 +40,10 @@ export default {
     const auth = request.headers.get('Authorization') || '';
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort('UPSTREAM_TIMEOUT'), 25000);
+      const timeoutId = setTimeout(() => controller.abort('UPSTREAM_TIMEOUT'), 120000);
       let upstream;
       try {
-        upstream = await fetch(`${targetBase}/chat/completions`, {
+        upstream = await fetch(`${targetBase}${upstreamPath}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -64,7 +68,7 @@ export default {
           {
             error: {
               message:
-                '自定义代理连接上游超时（25s）。通常是中转站/模型首字过慢或上游不通，请检查中转站连通性。',
+                '自定义代理连接上游超时（120s）。通常是生图/长回复耗时较长或上游不通，请检查中转站连通性。',
             },
           },
           { status: 504, headers: cors }
