@@ -2080,31 +2080,63 @@
       const size = state.settings.imageSize || '1024x1024';
       const count = Math.max(1, Math.min(4, parseInt(state.settings.imageCount, 10) || 1));
 
-      let response;
-      try {
-        response = await fetch(req.url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            ...req.extraHeaders
-          },
-          body: JSON.stringify({
-            model: model.modelId,
-            prompt,
-            size,
-            n: count
-          }),
-          signal: AbortSignal.timeout(180000)
-        });
-      } catch (err) {
-        throw new Error(parseFetchError(err));
+      async function postImage(payload) {
+        let response;
+        try {
+          response = await fetch(req.url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+              ...req.extraHeaders
+            },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(180000)
+          });
+        } catch (err) {
+          throw new Error(parseFetchError(err));
+        }
+        let json = {};
+        try {
+          json = await response.json();
+        } catch (_) {}
+        return { response, json };
       }
 
-      let json = {};
-      try {
-        json = await response.json();
-      } catch (_) {}
+      const primaryPayload = {
+        model: model.modelId,
+        prompt,
+        size,
+        n: count
+      };
+      let { response, json } = await postImage(primaryPayload);
+
+      // 兼容 Gemini/部分聚合模型：不支持 numberOfImages(n) 时自动降级重试
+      if (!response.ok) {
+        const errMsg = json?.error?.message || '';
+        const needRetryWithoutN =
+          /numberOfImages|generation_config\.image_config|Unknown name "n"/i.test(errMsg);
+        if (needRetryWithoutN) {
+          ({ response, json } = await postImage({
+            model: model.modelId,
+            prompt,
+            size
+          }));
+        }
+      }
+
+      // 继续兜底：若仍失败且提示 size 不支持，退化为最小请求体
+      if (!response.ok) {
+        const errMsg = json?.error?.message || '';
+        const needRetryMinimal = /Unknown name "size"|unsupported.*size|invalid.*size/i.test(errMsg);
+        if (needRetryMinimal) {
+          ({ response, json } = await postImage({
+            model: model.modelId,
+            prompt
+          }));
+        }
+      }
+
       if (!response.ok) {
         const errText = json?.error?.message || formatHttpError(response.status, '生图请求失败');
         throw new Error(errText);
