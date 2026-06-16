@@ -54,6 +54,9 @@ class ChatHandler(SimpleHTTPRequestHandler):
         if path.rstrip("/").endswith("/images/generations") or path.startswith("/api/images/generations"):
             self._proxy_path("/images/generations")
             return
+        if path.rstrip("/").endswith("/images/edit") or path.startswith("/api/images/edit"):
+            self._proxy_path("/images/edit")
+            return
         self.send_error(404, "Not Found")
 
     def _proxy_path(self, suffix: str):
@@ -66,7 +69,10 @@ class ChatHandler(SimpleHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         upstream = f"{target_base}{suffix}"
 
-        headers = {"Content-Type": "application/json"}
+        headers = {}
+        content_type = self.headers.get("Content-Type")
+        if content_type:
+            headers["Content-Type"] = content_type
         auth = self.headers.get("Authorization")
         if auth:
             headers["Authorization"] = auth

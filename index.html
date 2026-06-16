@@ -598,6 +598,83 @@
       cursor: pointer;
       outline: none;
     }
+    .img2img-options {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .img2img-options.visible { display: flex; }
+    .img2img-upload {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 12px;
+      cursor: pointer;
+      overflow: hidden;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .img2img-upload:hover {
+      border-color: rgba(138, 180, 248, 0.45);
+      color: var(--text);
+    }
+    .img2img-upload input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .img2img-preview {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 8px;
+      background: rgba(255,255,255,0.03);
+    }
+    .img2img-preview.visible { display: flex; }
+    .img2img-preview img {
+      width: 52px;
+      height: 52px;
+      border-radius: 8px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .img2img-preview-meta {
+      flex: 1;
+      min-width: 0;
+      color: var(--text-secondary);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-clear-ref {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      min-height: 34px;
+      flex-shrink: 0;
+    }
+    .btn-clear-ref:hover {
+      color: #f28b82;
+      border-color: rgba(242, 139, 130, 0.55);
+      background: rgba(242,139,130,0.09);
+    }
 
     .input-row {
       display: flex;
@@ -1115,6 +1192,15 @@
       }
       .image-options.visible { display: flex; }
       .image-options select { width: 100%; }
+      .img2img-options {
+        display: none;
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .img2img-options.visible { display: flex; }
+      .img2img-upload { width: 100%; min-height: 40px; }
+      .img2img-preview { padding: 8px 10px; }
+      .btn-clear-ref { min-height: 40px; }
       #message-input { font-size: 16px; }
       .input-hint { font-size: 10px; margin-top: 6px; }
       .gallery-page { padding: 14px 12px; }
@@ -1231,6 +1317,7 @@
             <select class="mode-select" id="chat-mode-select" title="选择模式">
               <option value="chat">对话模式</option>
               <option value="image">文生图模式</option>
+              <option value="img2img">图生图模式</option>
             </select>
             <select class="model-select" id="model-select" title="选择模型">
               <option value="">请先配置模型</option>
@@ -1250,6 +1337,17 @@
               <option value="3">生成 3 张</option>
               <option value="4">生成 4 张</option>
             </select>
+          </div>
+          <div class="img2img-options" id="img2img-options">
+            <label class="img2img-upload" for="img2img-file-input">
+              上传参考图
+              <input type="file" id="img2img-file-input" accept="image/png,image/jpeg,image/webp" />
+            </label>
+          </div>
+          <div class="img2img-preview" id="img2img-preview">
+            <img id="img2img-preview-img" alt="参考图预览" />
+            <div class="img2img-preview-meta" id="img2img-preview-name"></div>
+            <button type="button" class="btn-clear-ref" id="btn-clear-img2img">清除</button>
           </div>
           <div class="input-row">
             <textarea id="message-input" rows="1" placeholder="输入消息…" autocomplete="off"></textarea>
@@ -1368,6 +1466,7 @@
     const STORAGE_KEY = 'chat-ai-app-v1';
     const IMAGE_DB_NAME = 'chat-ai-images-v1';
     const imageUrlCache = new Map();
+    const IMG2IMG_MAX_FILE_SIZE = 10 * 1024 * 1024;
 
     // ========== 部署默认配置（同事首次打开自动带上模型列表）==========
     const BUILD_DEFAULTS = {
@@ -1405,6 +1504,7 @@
     let activeView = 'chat';
     let currentPreviewImage = null;
     let lightboxSuppressUntil = 0;
+    let pendingImageEdit = null;
 
     const MAX_TOKENS_LARGE = 65536;
 
@@ -1735,6 +1835,30 @@
       };
     }
 
+    function resolveImageEditRequestForMode(baseUrl, mode, customProxyUrl) {
+      const baseErr = validateBaseUrl(baseUrl);
+      if (baseErr) throw new Error(baseErr);
+
+      if (mode === 'custom') {
+        const proxy = normalizeProxyUrl(customProxyUrl || state.settings.customProxyUrl);
+        if (!proxy) throw new Error('请填写自定义代理地址（Cloudflare Worker 或 serve.py 公网地址）');
+        const path = proxy.includes('images/edit') ? proxy : `${proxy}/api/images/edit`;
+        return { url: path, extraHeaders: { 'X-Target-Base-Url': baseUrl }, mode: 'custom' };
+      }
+      if (mode === 'proxy' && canUseSiteProxy()) {
+        return {
+          url: `${window.location.origin}/api/images/edit`,
+          extraHeaders: { 'X-Target-Base-Url': baseUrl },
+          mode: 'proxy'
+        };
+      }
+      return {
+        url: `${baseUrl}/images/edit`,
+        extraHeaders: {},
+        mode: 'direct'
+      };
+    }
+
     function updateConnectionFieldsVisibility() {
       const mode = document.getElementById('connection-mode').value;
       const custom = document.getElementById('custom-proxy-url');
@@ -1754,7 +1878,9 @@
     }
 
     function resolveSiteProxyRequest(baseUrl, kind) {
-      const path = kind === 'image' ? '/api/images/generations' : '/api/chat/completions';
+      let path = '/api/chat/completions';
+      if (kind === 'image') path = '/api/images/generations';
+      if (kind === 'image-edit') path = '/api/images/edit';
       return {
         url: `${window.location.origin}${path}`,
         extraHeaders: { 'X-Target-Base-Url': baseUrl },
@@ -1764,9 +1890,10 @@
 
     async function apiFetch(baseUrl, kind, init) {
       const mode = getConnectionMode();
-      const req = kind === 'image'
-        ? resolveImageRequestForMode(baseUrl, mode, state.settings.customProxyUrl)
-        : resolveApiRequestForMode(baseUrl, mode, state.settings.customProxyUrl);
+      let req;
+      if (kind === 'image') req = resolveImageRequestForMode(baseUrl, mode, state.settings.customProxyUrl);
+      else if (kind === 'image-edit') req = resolveImageEditRequestForMode(baseUrl, mode, state.settings.customProxyUrl);
+      else req = resolveApiRequestForMode(baseUrl, mode, state.settings.customProxyUrl);
 
       const doFetch = (request) => fetch(request.url, {
         ...init,
@@ -1790,7 +1917,7 @@
     async function testProxyReachability(customProxy) {
       const proxy = normalizeProxyUrl(customProxy);
       if (!proxy) return { ok: false, text: '未填写自定义代理地址' };
-      const root = proxy.replace(/\/api\/(chat\/completions|images\/generations).*$/, '');
+      const root = proxy.replace(/\/api\/(chat\/completions|images\/generations|images\/edit).*$/, '');
       const pingUrl = `${root}/health`;
       const start = Date.now();
       try {
@@ -2411,10 +2538,14 @@
     function renderInputMode() {
       const mode = getInputMode();
       const options = document.getElementById('image-options');
+      const img2imgOptions = document.getElementById('img2img-options');
+      const img2imgPreview = document.getElementById('img2img-preview');
       const input = document.getElementById('message-input');
       options.classList.toggle('visible', mode === 'image');
-      input.placeholder = mode === 'image' ? '输入生图提示词…' : '输入消息…';
-      if (mode === 'image') {
+      img2imgOptions.classList.toggle('visible', mode === 'img2img');
+      img2imgPreview.classList.toggle('visible', mode === 'img2img' && !!pendingImageEdit);
+      input.placeholder = mode === 'image' || mode === 'img2img' ? '输入生图提示词…' : '输入消息…';
+      if (mode === 'image' || mode === 'img2img') {
         document.getElementById('image-size').value = state.settings.imageSize || '1024x1024';
         document.getElementById('image-count').value = String(state.settings.imageCount || 1);
       }
@@ -2423,9 +2554,9 @@
     function renderModelSelect() {
       const mode = getInputMode();
       const sel = document.getElementById('model-select');
-      const models = mode === 'image' ? state.settings.imageModels : state.settings.models;
+      const models = mode === 'image' || mode === 'img2img' ? state.settings.imageModels : state.settings.models;
       if (!models.length) {
-        sel.innerHTML = `<option value="">请先在设置中添加${mode === 'image' ? '生图' : '对话'}模型</option>`;
+        sel.innerHTML = `<option value="">请先在设置中添加${mode === 'image' || mode === 'img2img' ? '生图' : '对话'}模型</option>`;
         sel.disabled = true;
         return;
       }
@@ -2444,8 +2575,11 @@
       const btn = document.getElementById('btn-send');
       const hasText = input.value.trim().length > 0;
       const mode = getInputMode();
-      const hasModel = mode === 'image' ? state.settings.imageModels.length > 0 : state.settings.models.length > 0;
-      btn.disabled = !hasText || !hasModel || isStreaming;
+      const hasModel = mode === 'image' || mode === 'img2img'
+        ? state.settings.imageModels.length > 0
+        : state.settings.models.length > 0;
+      const hasReference = mode !== 'img2img' || !!pendingImageEdit;
+      btn.disabled = !hasText || !hasModel || !hasReference || isStreaming;
     }
 
     function setStreaming(active) {
@@ -2455,6 +2589,8 @@
       document.getElementById('message-input').disabled = active;
       document.getElementById('chat-mode-select').disabled = active;
       document.getElementById('model-select').disabled = active;
+      document.getElementById('img2img-file-input').disabled = active;
+      document.getElementById('btn-clear-img2img').disabled = active;
       updateSendButton();
     }
 
@@ -2709,6 +2845,107 @@
       return images;
     }
 
+    function clearImageEditReference(resetInput = true) {
+      pendingImageEdit = null;
+      document.getElementById('img2img-preview').classList.remove('visible');
+      document.getElementById('img2img-preview-img').removeAttribute('src');
+      document.getElementById('img2img-preview-name').textContent = '';
+      if (resetInput) {
+        document.getElementById('img2img-file-input').value = '';
+      }
+      updateSendButton();
+    }
+
+    function setImageEditReference(file) {
+      if (!file) {
+        clearImageEditReference();
+        return;
+      }
+      pendingImageEdit = file;
+      const blobUrl = URL.createObjectURL(file);
+      const preview = document.getElementById('img2img-preview');
+      const img = document.getElementById('img2img-preview-img');
+      const nameEl = document.getElementById('img2img-preview-name');
+      img.src = blobUrl;
+      nameEl.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`;
+      preview.classList.add('visible');
+      updateSendButton();
+    }
+
+    async function generateImageEdit(session, prompt, model, referenceFile) {
+      const baseUrl = normalizeBaseUrl(state.settings.baseUrl);
+      const apiKey = state.settings.apiKey;
+      if (!baseUrl || !apiKey) throw new Error('请先在设置中填写 Base URL 和 API Key');
+      if (!model) throw new Error('请选择生图模型');
+      if (!referenceFile) throw new Error('请先上传参考图');
+
+      const size = state.settings.imageSize || '1024x1024';
+      const formData = new FormData();
+      formData.set('model', model.modelId);
+      formData.set('prompt', prompt);
+      formData.set('size', size);
+      formData.set('image', referenceFile, referenceFile.name || 'reference.png');
+      formData.set('input_fidelity', 'high');
+
+      let response;
+      try {
+        response = await apiFetch(baseUrl, 'image-edit', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: formData,
+          signal: AbortSignal.timeout(180000),
+        });
+      } catch (err) {
+        throw new Error(parseFetchError(err));
+      }
+
+      let json = {};
+      try {
+        json = await response.json();
+      } catch (_) {}
+      if (!response.ok) {
+        const errText = json?.error?.message || formatHttpError(response.status, '图生图请求失败');
+        throw new Error(errText);
+      }
+
+      const images = [];
+      const extract = (arr) => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach((item, idx) => {
+          const mime = item?.mime || item?.mime_type || 'image/png';
+          const b64 = item?.b64_json || item?.b64 || item?.image_base64 || '';
+          const direct = item?.url || item?.image_url || item?.uri || '';
+          const url = direct || (b64 ? `data:${mime};base64,${b64}` : '');
+          if (!url) return;
+          images.push({
+            id: uid(),
+            url,
+            b64,
+            mime,
+            modelName: model.name,
+            modelId: model.modelId,
+            prompt,
+            timestamp: Date.now() + idx
+          });
+        });
+      };
+      extract(json?.data);
+      extract(json?.images);
+      extract(json?.output);
+      if (!images.length) {
+        const preview = JSON.stringify(json || {}).slice(0, 260);
+        throw new Error(`图生图接口返回 200，但没有图片数据。响应片段：${preview}`);
+      }
+      for (const img of images) {
+        await putImageRecord(img);
+      }
+      state.gallery = [...(state.gallery || []), ...images.map(slimImageMeta)];
+      saveState();
+      return images;
+    }
+
     function updateStreamingBubble(msg) {
       const el = document.querySelector(`.message[data-id="${msg.id}"] .message-body`);
       if (el) {
@@ -2733,14 +2970,18 @@
 
       const mode = getInputMode();
       const modelId = document.getElementById('model-select').value;
-      const modelPool = mode === 'image' ? state.settings.imageModels : state.settings.models;
+      const modelPool = mode === 'image' || mode === 'img2img' ? state.settings.imageModels : state.settings.models;
       const model = modelPool.find(m => m.id === modelId);
       if (!model) {
-        showError(`请先选择或配置${mode === 'image' ? '生图' : '对话'}模型`);
+        showError(`请先选择或配置${mode === 'image' || mode === 'img2img' ? '生图' : '对话'}模型`);
+        return;
+      }
+      if (mode === 'img2img' && !pendingImageEdit) {
+        showError('图生图模式请先上传参考图');
         return;
       }
 
-      if (mode === 'image') state.lastImageModelId = modelId;
+      if (mode === 'image' || mode === 'img2img') state.lastImageModelId = modelId;
       else state.lastModelId = modelId;
       saveState();
 
@@ -2760,8 +3001,8 @@
       const assistantMsg = {
         id: uid(),
         role: 'assistant',
-        content: mode === 'image' ? '生图进行中，可能需要 1-3 分钟，请稍候…' : '',
-        kind: mode === 'image' ? 'image' : 'text',
+        content: mode === 'image' || mode === 'img2img' ? '生图进行中，可能需要 1-3 分钟，请稍候…' : '',
+        kind: mode === 'image' || mode === 'img2img' ? 'image' : 'text',
         modelId: model.id,
         modelName: model.name,
         modelApiId: model.modelId,
@@ -2782,6 +3023,12 @@
           assistantMsg.images = images.map(img => ({ id: img.id }));
           assistantMsg.content = `已生成 ${assistantMsg.images.length} 张图片`;
           assistantMsg.streaming = false;
+        } else if (mode === 'img2img') {
+          const images = await generateImageEdit(session, text, model, pendingImageEdit);
+          assistantMsg.images = images.map(img => ({ id: img.id }));
+          assistantMsg.content = `已根据参考图生成 ${assistantMsg.images.length} 张图片`;
+          assistantMsg.streaming = false;
+          clearImageEditReference();
         } else {
           await streamCompletion(session, assistantMsg, model);
         }
@@ -3191,6 +3438,23 @@
       state.settings.imageCount = Math.max(1, Math.min(4, parseInt(e.target.value, 10) || 1));
       saveState();
     });
+    document.getElementById('img2img-file-input').addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        showError('仅支持上传图片文件（png/jpg/webp）');
+        clearImageEditReference();
+        return;
+      }
+      if (file.size > IMG2IMG_MAX_FILE_SIZE) {
+        showError('参考图不能超过 10MB，请压缩后再上传');
+        clearImageEditReference();
+        return;
+      }
+      setImageEditReference(file);
+      renderInputMode();
+    });
+    document.getElementById('btn-clear-img2img').addEventListener('click', () => clearImageEditReference());
 
     document.getElementById('btn-profile').addEventListener('click', () => {
       closeSidebar();
@@ -3243,7 +3507,7 @@
     });
 
     document.getElementById('model-select').addEventListener('change', (e) => {
-      if (getInputMode() === 'image') state.lastImageModelId = e.target.value;
+      if (getInputMode() === 'image' || getInputMode() === 'img2img') state.lastImageModelId = e.target.value;
       else state.lastModelId = e.target.value;
       saveState();
     });

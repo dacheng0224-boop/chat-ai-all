@@ -59,6 +59,8 @@ class ChatServlet < WEBrick::HTTPServlet::AbstractServlet
       proxy_to(req, res, "chat/completions")
     elsif path.end_with?("/images/generations") || path.start_with?("/api/images/generations")
       proxy_to(req, res, "images/generations")
+    elsif path.end_with?("/images/edit") || path.start_with?("/api/images/edit")
+      proxy_to(req, res, "images/edit")
     else
       res.status = 404
       res["Content-Type"] = "text/plain"
@@ -97,7 +99,7 @@ class ChatServlet < WEBrick::HTTPServlet::AbstractServlet
     http.open_timeout = 30
 
     proxy_req = Net::HTTP::Post.new(upstream.request_uri)
-    proxy_req["Content-Type"] = "application/json"
+    proxy_req["Content-Type"] = req["Content-Type"] if req["Content-Type"]
     proxy_req["Authorization"] = req["Authorization"] if req["Authorization"]
     proxy_req.body = req.body
 

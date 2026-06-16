@@ -30,6 +30,7 @@ export default {
     let upstreamPath = '';
     if (url.pathname.includes('chat/completions')) upstreamPath = '/chat/completions';
     if (url.pathname.includes('images/generations')) upstreamPath = '/images/generations';
+    if (url.pathname.includes('images/edit')) upstreamPath = '/images/edit';
     if (!upstreamPath) return new Response('Not Found', { status: 404, headers: cors });
 
     const targetBase = (request.headers.get('X-Target-Base-Url') || '').trim().replace(/\/+$/, '');
@@ -41,6 +42,7 @@ export default {
     }
 
     const auth = request.headers.get('Authorization') || '';
+    const contentType = request.headers.get('Content-Type') || '';
     // 生图通常比对话更慢，单独放宽超时
     const timeoutMs = upstreamPath.includes('images') ? 300000 : 120000;
     try {
@@ -51,7 +53,7 @@ export default {
         upstream = await fetch(`${targetBase}${upstreamPath}`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
+            ...(contentType ? { 'Content-Type': contentType } : {}),
             Authorization: auth,
           },
           body: request.body,

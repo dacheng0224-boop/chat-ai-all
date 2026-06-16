@@ -24,8 +24,8 @@ export default async function handler(req) {
   }
 
   const auth = req.headers.get('authorization') || '';
-  const upstream = `${targetBase}/images/generations`;
   const contentType = req.headers.get('content-type');
+  const upstream = `${targetBase}/images/edit`;
 
   try {
     const resp = await fetch(upstream, {
