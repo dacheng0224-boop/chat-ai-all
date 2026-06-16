@@ -2545,6 +2545,12 @@
       img2imgOptions.classList.toggle('visible', mode === 'img2img');
       img2imgPreview.classList.toggle('visible', mode === 'img2img' && !!pendingImageEdit);
       input.placeholder = mode === 'image' || mode === 'img2img' ? '输入生图提示词…' : '输入消息…';
+      const hint = document.querySelector('.input-hint');
+      if (hint) {
+        hint.textContent = mode === 'img2img'
+          ? '图生图：上传参考图 + 提示词。Gemini/豆包走对话接口，GPT Image 走编辑接口。'
+          : 'Enter 发送 · Shift+Enter 换行';
+      }
       if (mode === 'image' || mode === 'img2img') {
         document.getElementById('image-size').value = state.settings.imageSize || '1024x1024';
         document.getElementById('image-count').value = String(state.settings.imageCount || 1);
@@ -2845,40 +2851,169 @@
       return images;
     }
 
-    function clearImageEditReference(resetInput = true) {
-      pendingImageEdit = null;
-      document.getElementById('img2img-preview').classList.remove('visible');
-      document.getElementById('img2img-preview-img').removeAttribute('src');
-      document.getElementById('img2img-preview-name').textContent = '';
-      if (resetInput) {
-        document.getElementById('img2img-file-input').value = '';
-      }
-      updateSendButton();
+    function isGptImageEditModel(modelId) {
+      return /gpt-image|dall-e-3|dall-e-2/i.test(modelId || '');
     }
 
-    function setImageEditReference(file) {
-      if (!file) {
-        clearImageEditReference();
-        return;
-      }
-      pendingImageEdit = file;
-      const blobUrl = URL.createObjectURL(file);
-      const preview = document.getElementById('img2img-preview');
-      const img = document.getElementById('img2img-preview-img');
-      const nameEl = document.getElementById('img2img-preview-name');
-      img.src = blobUrl;
-      nameEl.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`;
-      preview.classList.add('visible');
-      updateSendButton();
+    function usesChatImageEdit(modelId) {
+      return /gemini|google\/|doubao|seedream|volcengine/i.test(modelId || '');
     }
 
-    async function generateImageEdit(session, prompt, model, referenceFile) {
-      const baseUrl = normalizeBaseUrl(state.settings.baseUrl);
-      const apiKey = state.settings.apiKey;
-      if (!baseUrl || !apiKey) throw new Error('请先在设置中填写 Base URL 和 API Key');
-      if (!model) throw new Error('请选择生图模型');
-      if (!referenceFile) throw new Error('请先上传参考图');
+    function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('读取参考图失败'));
+        reader.readAsDataURL(file);
+      });
+    }
 
+    function buildImageRecord({ url, b64 = '', mime = 'image/png', model, prompt, idx = 0 }) {
+      if (!url) return null;
+      return {
+        id: uid(),
+        url,
+        b64,
+        mime,
+        modelName: model.name,
+        modelId: model.modelId,
+        prompt,
+        timestamp: Date.now() + idx
+      };
+    }
+
+    async function persistGeneratedImages(images) {
+      for (const img of images) {
+        await putImageRecord(img);
+      }
+      state.gallery = [...(state.gallery || []), ...images.map(slimImageMeta)];
+      saveState();
+      return images;
+    }
+
+    function extractImagesFromChatCompletion(json, prompt, model) {
+      const images = [];
+      const pushUrl = (url, b64, mime, idx) => {
+        const rec = buildImageRecord({ url, b64, mime, model, prompt, idx: images.length + idx });
+        if (rec) images.push(rec);
+      };
+
+      const msg = json?.choices?.[0]?.message;
+      if (msg) {
+        if (Array.isArray(msg.content)) {
+          msg.content.forEach((part, idx) => {
+            if (!part || typeof part !== 'object') return;
+            if (part.type === 'image_url' && part.image_url?.url) pushUrl(part.image_url.url, '', 'image/png', idx);
+            if (part.type === 'image' && (part.url || part.image_url?.url)) {
+              pushUrl(part.url || part.image_url.url, '', 'image/png', idx);
+            }
+            const inline = part.inline_data || part.inlineData;
+            if (inline?.data) {
+              const mime = inline.mime_type || inline.mimeType || 'image/png';
+              pushUrl(`data:${mime};base64,${inline.data}`, inline.data, mime, idx);
+            }
+          });
+        } else if (typeof msg.content === 'string' && msg.content.trim()) {
+          const s = msg.content.trim();
+          if (s.startsWith('data:image')) pushUrl(s, '', 'image/png', 0);
+          else if (/^https?:\/\//i.test(s)) pushUrl(s, '', 'image/png', 0);
+          else {
+            const md = s.match(/!\[[^\]]*\]\(([^)]+)\)/);
+            if (md?.[1]) pushUrl(md[1], '', 'image/png', 0);
+            const urlMatch = s.match(/(https?:\/\/\S+\.(?:png|jpe?g|webp)(?:\?\S*)?)/i);
+            if (urlMatch?.[1]) pushUrl(urlMatch[1], '', 'image/png', 0);
+          }
+        }
+        if (Array.isArray(msg.images)) {
+          msg.images.forEach((item, idx) => {
+            const mime = item?.mime || item?.mime_type || 'image/png';
+            const b64 = item?.b64_json || item?.b64 || item?.image_base64 || '';
+            const direct = item?.url || item?.image_url || item?.uri || '';
+            pushUrl(direct || (b64 ? `data:${mime};base64,${b64}` : ''), b64, mime, idx);
+          });
+        }
+      }
+
+      const walkParts = (parts) => {
+        if (!Array.isArray(parts)) return;
+        parts.forEach((part, idx) => {
+          const inline = part?.inlineData || part?.inline_data;
+          if (inline?.data) {
+            const mime = inline.mimeType || inline.mime_type || 'image/png';
+            pushUrl(`data:${mime};base64,${inline.data}`, inline.data, mime, idx);
+          }
+        });
+      };
+      walkParts(json?.candidates?.[0]?.content?.parts);
+
+      const payloadImages = [];
+      const pushMany = (arr) => {
+        if (!Array.isArray(arr)) return;
+        arr.forEach((item, idx) => {
+          if (item && typeof item === 'object') {
+            const mime = item.mime || item.mime_type || 'image/png';
+            const b64 = item.b64_json || item.b64 || item.image_base64 || '';
+            const direct = item.url || item.image_url || item.uri || '';
+            const url = direct || (b64 ? `data:${mime};base64,${b64}` : '');
+            if (url) payloadImages.push(buildImageRecord({ url, b64, mime, model, prompt, idx }));
+          }
+        });
+      };
+      pushMany(json?.data);
+      pushMany(json?.images);
+      return [...images, ...payloadImages.filter(Boolean)];
+    }
+
+    async function generateImageEditViaChat(baseUrl, apiKey, prompt, model, referenceFile) {
+      const dataUrl = await fileToDataUrl(referenceFile);
+      const body = {
+        model: model.modelId,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: dataUrl } }
+          ]
+        }],
+        stream: false
+      };
+      if (/gemini|google\//i.test(model.modelId)) {
+        body.modalities = ['text', 'image'];
+      }
+
+      let response;
+      try {
+        response = await apiFetch(baseUrl, 'chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(180000),
+        });
+      } catch (err) {
+        throw new Error(parseFetchError(err));
+      }
+
+      let json = {};
+      try {
+        json = await response.json();
+      } catch (_) {}
+      if (!response.ok) {
+        const errText = json?.error?.message || formatHttpError(response.status, '图生图请求失败');
+        throw new Error(errText);
+      }
+
+      const images = extractImagesFromChatCompletion(json, prompt, model);
+      if (!images.length) {
+        const preview = JSON.stringify(json || {}).slice(0, 260);
+        throw new Error(`图生图接口返回 200，但没有图片数据。响应片段：${preview}`);
+      }
+      return persistGeneratedImages(images);
+    }
+
+    async function generateImageEditViaForm(baseUrl, apiKey, prompt, model, referenceFile) {
       const size = state.settings.imageSize || '1024x1024';
       const formData = new FormData();
       formData.set('model', model.modelId);
@@ -2918,17 +3053,8 @@
           const b64 = item?.b64_json || item?.b64 || item?.image_base64 || '';
           const direct = item?.url || item?.image_url || item?.uri || '';
           const url = direct || (b64 ? `data:${mime};base64,${b64}` : '');
-          if (!url) return;
-          images.push({
-            id: uid(),
-            url,
-            b64,
-            mime,
-            modelName: model.name,
-            modelId: model.modelId,
-            prompt,
-            timestamp: Date.now() + idx
-          });
+          const rec = buildImageRecord({ url, b64, mime, model, prompt, idx });
+          if (rec) images.push(rec);
         });
       };
       extract(json?.data);
@@ -2938,12 +3064,68 @@
         const preview = JSON.stringify(json || {}).slice(0, 260);
         throw new Error(`图生图接口返回 200，但没有图片数据。响应片段：${preview}`);
       }
-      for (const img of images) {
-        await putImageRecord(img);
+      return persistGeneratedImages(images);
+    }
+
+    function clearImageEditReference(resetInput = true) {
+      pendingImageEdit = null;
+      document.getElementById('img2img-preview').classList.remove('visible');
+      document.getElementById('img2img-preview-img').removeAttribute('src');
+      document.getElementById('img2img-preview-name').textContent = '';
+      if (resetInput) {
+        document.getElementById('img2img-file-input').value = '';
       }
-      state.gallery = [...(state.gallery || []), ...images.map(slimImageMeta)];
-      saveState();
-      return images;
+      updateSendButton();
+    }
+
+    function setImageEditReference(file) {
+      if (!file) {
+        clearImageEditReference();
+        return;
+      }
+      pendingImageEdit = file;
+      const blobUrl = URL.createObjectURL(file);
+      const preview = document.getElementById('img2img-preview');
+      const img = document.getElementById('img2img-preview-img');
+      const nameEl = document.getElementById('img2img-preview-name');
+      img.src = blobUrl;
+      nameEl.textContent = `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`;
+      preview.classList.add('visible');
+      updateSendButton();
+    }
+
+    async function generateImageEdit(session, prompt, model, referenceFile) {
+      const baseUrl = normalizeBaseUrl(state.settings.baseUrl);
+      const apiKey = state.settings.apiKey;
+      if (!baseUrl || !apiKey) throw new Error('请先在设置中填写 Base URL 和 API Key');
+      if (!model) throw new Error('请选择生图模型');
+      if (!referenceFile) throw new Error('请先上传参考图');
+
+      if (isGptImageEditModel(model.modelId)) {
+        try {
+          return await generateImageEditViaForm(baseUrl, apiKey, prompt, model, referenceFile);
+        } catch (err) {
+          const msg = err?.message || '';
+          if (/unsupported.*endpoint/i.test(msg) || usesChatImageEdit(model.modelId)) {
+            return generateImageEditViaChat(baseUrl, apiKey, prompt, model, referenceFile);
+          }
+          throw err;
+        }
+      }
+
+      if (usesChatImageEdit(model.modelId)) {
+        return generateImageEditViaChat(baseUrl, apiKey, prompt, model, referenceFile);
+      }
+
+      try {
+        return await generateImageEditViaForm(baseUrl, apiKey, prompt, model, referenceFile);
+      } catch (err) {
+        const msg = err?.message || '';
+        if (/unsupported.*endpoint/i.test(msg)) {
+          return generateImageEditViaChat(baseUrl, apiKey, prompt, model, referenceFile);
+        }
+        throw err;
+      }
     }
 
     function updateStreamingBubble(msg) {
