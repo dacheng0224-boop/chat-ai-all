@@ -1003,6 +1003,20 @@
   <script>
     const STORAGE_KEY = 'chat-ai-app-v1';
 
+    // ========== 部署默认配置（同事首次打开自动带上模型列表）==========
+    const BUILD_DEFAULTS = {
+      version: 1,
+      connectionMode: 'proxy',
+      customProxyUrl: '',
+      models: [
+        { name: 'Claude 4.7 顶模', modelId: 'anthropic/claude-opus-4.7' },
+        { name: 'Gemini 3.1 Pro Preview', modelId: 'google/gemini-3.1-pro-preview' },
+        { name: 'GPT 5.5', modelId: 'openai/gpt-5.5' },
+        { name: 'DeepSeek V4-Pro', modelId: 'deepseek/deepseek-v4-pro' }
+      ]
+    };
+    // Base URL、API Key 由每人自行填写。
+
     marked.setOptions({
       breaks: true,
       gfm: true,
@@ -1021,22 +1035,45 @@
 
     const MAX_TOKENS_LARGE = 65536;
 
+    function buildDefaultModels() {
+      return BUILD_DEFAULTS.models.map(m => ({
+        id: uid(),
+        name: m.name,
+        modelId: m.modelId
+      }));
+    }
+
+    function needsDefaultModels(settings, savedVersion) {
+      return !settings.models?.length || (savedVersion || 0) < BUILD_DEFAULTS.version;
+    }
+
+    function applyBuildDefaults(settings, savedVersion) {
+      const s = { ...settings };
+      if (needsDefaultModels(s, savedVersion)) s.models = buildDefaultModels();
+      if (!s.connectionMode) s.connectionMode = BUILD_DEFAULTS.connectionMode;
+      if (!s.customProxyUrl && BUILD_DEFAULTS.customProxyUrl) {
+        s.customProxyUrl = BUILD_DEFAULTS.customProxyUrl;
+      }
+      return s;
+    }
+
     function defaultState() {
       return {
-        settings: {
+        settings: applyBuildDefaults({
           baseUrl: '',
           apiKey: '',
-          models: [],
+          models: buildDefaultModels(),
           maxTokensMode: 'max',
           maxTokensCustom: 8192,
           contextMode: 'all',
           contextRounds: 30,
-          connectionMode: 'custom',
-          customProxyUrl: ''
-        },
+          connectionMode: BUILD_DEFAULTS.connectionMode,
+          customProxyUrl: BUILD_DEFAULTS.customProxyUrl
+        }, BUILD_DEFAULTS.version),
         sessions: [],
         activeSessionId: null,
-        lastModelId: null
+        lastModelId: null,
+        defaultsVersion: BUILD_DEFAULTS.version
       };
     }
 
@@ -1045,7 +1082,17 @@
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return defaultState();
         const parsed = JSON.parse(raw);
-        return { ...defaultState(), ...parsed, settings: { ...defaultState().settings, ...parsed.settings } };
+        const savedVersion = parsed.defaultsVersion || 0;
+        const merged = {
+          ...defaultState(),
+          ...parsed,
+          settings: applyBuildDefaults({ ...defaultState().settings, ...parsed.settings }, savedVersion)
+        };
+        if (needsDefaultModels(parsed.settings, savedVersion)) {
+          merged.defaultsVersion = BUILD_DEFAULTS.version;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        }
+        return merged;
       } catch {
         return defaultState();
       }
@@ -2045,6 +2092,7 @@
       state.settings.contextRounds = parseInt(document.getElementById('context-rounds').value, 10) || 30;
       state.settings.connectionMode = document.getElementById('connection-mode').value;
       state.settings.customProxyUrl = normalizeProxyUrl(document.getElementById('custom-proxy-url').value);
+      state.defaultsVersion = BUILD_DEFAULTS.version;
 
       saveState();
       closeSettings();
@@ -2112,7 +2160,7 @@
     else ensureSession();
     render();
 
-    if (!state.settings.models.length || !state.settings.baseUrl) {
+    if (!state.settings.apiKey || !state.settings.baseUrl) {
       setTimeout(openSettings, 300);
     }
   </script>
