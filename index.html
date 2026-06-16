@@ -677,8 +677,28 @@
       align-items: center;
       justify-content: space-between;
       margin-bottom: 12px;
+      gap: 12px;
     }
     .gallery-title { font-size: 20px; font-weight: 500; }
+    .btn-back-chat {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .btn-back-chat:hover {
+      background: var(--sidebar-hover);
+      color: var(--text);
+      border-color: rgba(138, 180, 248, 0.35);
+    }
     .gallery-empty {
       color: var(--text-secondary);
       border: 1px dashed var(--border);
@@ -1025,7 +1045,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/>
           </svg>
-          个人中心
+          <span>个人中心</span>
         </button>
       </div>
     </aside>
@@ -1773,6 +1793,33 @@
           renderMessages();
         });
       });
+      container.querySelectorAll('[data-action="back-chat"]').forEach((btn) => {
+        btn.addEventListener('click', () => setActiveView('chat'));
+      });
+    }
+
+    function setActiveView(view) {
+      activeView = view === 'gallery' ? 'gallery' : 'chat';
+      const profileBtn = document.getElementById('btn-profile');
+      const profileLabel = profileBtn.querySelector('span') || (() => {
+        const span = document.createElement('span');
+        profileBtn.appendChild(span);
+        return span;
+      })();
+      profileBtn.classList.toggle('active', activeView === 'gallery');
+      profileLabel.textContent = activeView === 'gallery' ? '返回对话' : '个人中心';
+      document.getElementById('chat-toolbar').style.display = activeView === 'gallery' ? 'none' : 'flex';
+      document.querySelector('.input-area').style.display = activeView === 'gallery' ? 'none' : 'block';
+      renderMessages();
+    }
+
+    function galleryBackButtonHtml() {
+      return `<button type="button" class="btn-back-chat" data-action="back-chat" aria-label="返回对话">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        返回对话
+      </button>`;
     }
 
     function renderGallery(container) {
@@ -1780,15 +1827,22 @@
       if (!list.length) {
         container.innerHTML = `
           <section class="gallery-page">
-            <div class="gallery-header"><h2 class="gallery-title">个人中心 · 图库</h2></div>
+            <div class="gallery-header">
+              <h2 class="gallery-title">个人中心 · 图库</h2>
+              ${galleryBackButtonHtml()}
+            </div>
             <div class="gallery-empty">暂无图片。切换到“文生图模式”生成后会自动保存到这里。</div>
           </section>
         `;
+        bindImageActions(container);
         return;
       }
       container.innerHTML = `
         <section class="gallery-page">
-          <div class="gallery-header"><h2 class="gallery-title">个人中心 · 图库 (${list.length})</h2></div>
+          <div class="gallery-header">
+            <h2 class="gallery-title">个人中心 · 图库 (${list.length})</h2>
+            ${galleryBackButtonHtml()}
+          </div>
           <div class="image-grid">
             ${list.map((img, idx) => `
               <div class="image-card">
@@ -1955,6 +2009,7 @@
           if (e.target.closest('.session-delete, .session-rename, .session-title-input')) return;
           state.activeSessionId = el.dataset.id;
           saveState();
+          setActiveView('chat');
           render();
         });
       });
@@ -2814,6 +2869,7 @@
     // Events
     document.getElementById('btn-new-chat').addEventListener('click', () => {
       createSession();
+      setActiveView('chat');
       render();
     });
 
@@ -2853,11 +2909,7 @@
     });
 
     document.getElementById('btn-profile').addEventListener('click', () => {
-      activeView = activeView === 'gallery' ? 'chat' : 'gallery';
-      document.getElementById('btn-profile').classList.toggle('active', activeView === 'gallery');
-      document.getElementById('chat-toolbar').style.display = activeView === 'gallery' ? 'none' : 'flex';
-      document.querySelector('.input-area').style.display = activeView === 'gallery' ? 'none' : 'block';
-      renderMessages();
+      setActiveView(activeView === 'gallery' ? 'chat' : 'gallery');
     });
 
     document.getElementById('lightbox-close').addEventListener('click', closeLightbox);
