@@ -733,6 +733,11 @@
       text-align: center;
     }
 
+    body.lightbox-open {
+      overflow: hidden;
+      touch-action: none;
+    }
+
     .lightbox {
       position: fixed;
       inset: 0;
@@ -742,11 +747,33 @@
       background: rgba(0,0,0,0.75);
       z-index: 120;
       padding: 20px;
+      touch-action: none;
     }
     .lightbox.open { display: flex; }
+    .lightbox-close-fab {
+      position: fixed;
+      top: calc(12px + env(safe-area-inset-top));
+      right: calc(12px + env(safe-area-inset-right));
+      z-index: 121;
+      width: 44px;
+      height: 44px;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .lightbox.open .lightbox-close-fab { display: inline-flex; }
     .lightbox-inner {
       max-width: min(1200px, 95vw);
       max-height: 90vh;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
     }
     .lightbox-img {
       display: block;
@@ -754,6 +781,9 @@
       max-height: 80vh;
       border-radius: 12px;
       border: 1px solid rgba(255,255,255,0.22);
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
     }
     .lightbox-actions {
       margin-top: 10px;
@@ -766,8 +796,12 @@
       background: rgba(255,255,255,0.08);
       color: #fff;
       border-radius: 8px;
-      padding: 8px 12px;
+      padding: 10px 16px;
+      min-height: 44px;
+      font-size: 14px;
       cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
 
     /* Modal */
@@ -1316,6 +1350,11 @@
 
   <div class="error-toast" id="error-toast"></div>
   <div class="lightbox" id="image-lightbox">
+    <button type="button" class="lightbox-close-fab" id="lightbox-close-fab" aria-label="关闭预览">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 6L6 18M6 6l12 12"/>
+      </svg>
+    </button>
     <div class="lightbox-inner">
       <img class="lightbox-img" id="lightbox-img" alt="预览图" />
       <div class="lightbox-actions">
@@ -1365,6 +1404,7 @@
     let isStreaming = false;
     let activeView = 'chat';
     let currentPreviewImage = null;
+    let lightboxSuppressUntil = 0;
 
     const MAX_TOKENS_LARGE = 65536;
 
@@ -1702,10 +1742,81 @@
       custom.style.display = mode === 'custom' ? 'block' : 'none';
       const hints = {
         direct: `直连：中转站须允许来源 ${window.location.origin} 跨域（CORS），否则 Failed to fetch。`,
-        custom: '自定义代理：部署 cloudflare-worker.js 到 Cloudflare Workers，填入 Worker 根地址。本地可用 http://127.0.0.1:8080。',
+        custom: '自定义代理：填入 Cloudflare Worker 地址。注意：国内手机移动网络可能无法访问 *.workers.dev，此时请改用「经 Vercel 本站代理」或为 Worker 绑定自有域名。',
         proxy: 'Vercel 本站代理约 20–30 秒会 504，仅适合极快响应；长回复请用自定义代理。',
       };
       hint.textContent = hints[mode] || hints.custom;
+    }
+
+    function isFetchNetworkError(err) {
+      const msg = err?.message || '';
+      return msg === 'Failed to fetch' || err instanceof TypeError;
+    }
+
+    function resolveSiteProxyRequest(baseUrl, kind) {
+      const path = kind === 'image' ? '/api/images/generations' : '/api/chat/completions';
+      return {
+        url: `${window.location.origin}${path}`,
+        extraHeaders: { 'X-Target-Base-Url': baseUrl },
+        mode: 'proxy'
+      };
+    }
+
+    async function apiFetch(baseUrl, kind, init) {
+      const mode = getConnectionMode();
+      const req = kind === 'image'
+        ? resolveImageRequestForMode(baseUrl, mode, state.settings.customProxyUrl)
+        : resolveApiRequestForMode(baseUrl, mode, state.settings.customProxyUrl);
+
+      const doFetch = (request) => fetch(request.url, {
+        ...init,
+        headers: {
+          ...init.headers,
+          ...request.extraHeaders,
+        },
+      });
+
+      try {
+        return await doFetch(req);
+      } catch (err) {
+        if (mode === 'custom' && isFetchNetworkError(err) && canUseSiteProxy()) {
+          showError('自定义代理不可达，已自动改用本站代理（长回复/生图可能超时）', 7000);
+          return await doFetch(resolveSiteProxyRequest(baseUrl, kind));
+        }
+        throw err;
+      }
+    }
+
+    async function testProxyReachability(customProxy) {
+      const proxy = normalizeProxyUrl(customProxy);
+      if (!proxy) return { ok: false, text: '未填写自定义代理地址' };
+      const root = proxy.replace(/\/api\/(chat\/completions|images\/generations).*$/, '');
+      const pingUrl = `${root}/health`;
+      const start = Date.now();
+      try {
+        const resp = await fetch(pingUrl, { method: 'GET', signal: AbortSignal.timeout(10000) });
+        const ms = Date.now() - start;
+        if (resp.ok) return { ok: true, text: `代理可达（${ms}ms）` };
+        return { ok: false, text: `代理返回 HTTP ${resp.status}（${ms}ms）` };
+      } catch (_) {
+        try {
+          const resp = await fetch(`${root}/api/chat/completions`, {
+            method: 'OPTIONS',
+            signal: AbortSignal.timeout(10000),
+          });
+          const ms = Date.now() - start;
+          if (resp.status === 204 || resp.status === 200) {
+            return { ok: true, text: `代理可达（OPTIONS ${resp.status}，${ms}ms）` };
+          }
+          return { ok: false, text: `代理返回 HTTP ${resp.status}（${ms}ms）` };
+        } catch (e) {
+          const ms = Date.now() - start;
+          return {
+            ok: false,
+            text: `代理不可达（${ms}ms）。国内手机移动网络常无法访问 *.workers.dev，请改用「经 Vercel 本站代理」。`,
+          };
+        }
+      }
     }
 
     async function testApiConnection(modeOverride) {
@@ -1743,7 +1854,7 @@
             stream: false,
             max_tokens: 5
           }),
-          signal: AbortSignal.timeout(25000)
+          signal: AbortSignal.timeout(45000)
         });
         const ms = Date.now() - start;
         const body = await resp.text();
@@ -1760,10 +1871,13 @@
         const ms = Date.now() - start;
         let msg = e.message || '未知错误';
         if (e.name === 'AbortError' || e.name === 'TimeoutError') {
-          msg = '连接超时（25s）：上游未及时响应。请检查 Worker 日志和中转站可用性。';
+          msg = '连接超时（45s）：上游未及时响应。若实际发送可成功，可忽略此测试超时；否则请检查 Worker 日志和中转站可用性。';
         }
         if (msg === 'Failed to fetch' && mode === 'direct') {
           msg = `Failed to fetch：中转站未允许 ${window.location.origin} 跨域。请改「自定义代理」，或在中转站配置 CORS。`;
+        }
+        if (msg === 'Failed to fetch' && mode === 'custom') {
+          msg = 'Failed to fetch：手机网络可能无法访问 Worker（*.workers.dev 常被移动网络拦截）。请改用「经 Vercel 本站代理」。';
         }
         return { mode, ok: false, text: `[${mode}] ${msg}（${ms}ms）` };
       }
@@ -1779,12 +1893,23 @@
 
       const selected = document.getElementById('connection-mode').value;
       const modes = selected === 'custom'
-        ? ['custom', 'direct']
-        : [selected, selected === 'direct' ? 'custom' : 'direct'];
+        ? ['custom', 'proxy']
+        : [selected, selected === 'direct' ? 'proxy' : 'direct'];
 
       const seen = new Set();
       const lines = [`页面来源：${window.location.origin}`, ''];
       let anyOk = false;
+
+      if (selected === 'custom') {
+        const customProxy = normalizeProxyUrl(document.getElementById('custom-proxy-url').value.trim());
+        const ping = await testProxyReachability(customProxy);
+        lines.push(`[代理连通] ${ping.text}`);
+        lines.push('');
+        if (!ping.ok) {
+          lines.push('提示：代理不可达时，发送消息会自动尝试改用本站代理。');
+          lines.push('');
+        }
+      }
 
       for (const mode of modes) {
         if (seen.has(mode)) continue;
@@ -1796,7 +1921,7 @@
       }
 
       if (!anyOk) {
-        lines.push('建议：部署 cloudflare-worker.js → 选「自定义代理」填入 Worker 地址。');
+        lines.push('建议：手机移动网络优先试「经 Vercel 本站代理」；电脑/Wi-Fi 长回复再用「自定义代理」。');
       }
 
       box.textContent = lines.join('\n').trim();
@@ -1822,7 +1947,7 @@
           return `无法连接（Failed to fetch）。中转站须允许 ${window.location.origin} 跨域；或改用「自定义代理」。`;
         }
         if (getConnectionMode() === 'custom') {
-          return '无法连接自定义代理。请检查代理地址是否可访问、是否已部署 cloudflare-worker.js。';
+          return '无法连接自定义代理。国内手机移动网络常无法访问 *.workers.dev，请改用「经 Vercel 本站代理」，或为 Worker 绑定自有域名。';
         }
         return '无法连接 API（Failed to fetch）。请检查 Base URL、API Key、网络/VPN。';
       }
@@ -1885,22 +2010,43 @@
     }
 
     function openLightbox(url) {
+      if (Date.now() < lightboxSuppressUntil) return;
       currentPreviewImage = url;
       const box = document.getElementById('image-lightbox');
       const img = document.getElementById('lightbox-img');
       img.src = url;
       box.classList.add('open');
+      document.body.classList.add('lightbox-open');
     }
 
-    function closeLightbox() {
+    function closeLightbox(e) {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
       document.getElementById('image-lightbox').classList.remove('open');
       document.getElementById('lightbox-img').src = '';
       currentPreviewImage = null;
+      document.body.classList.remove('lightbox-open');
+      // 防止手机端关闭瞬间点击穿透，再次触发下方缩略图打开
+      lightboxSuppressUntil = Date.now() + 400;
+    }
+
+    function bindLightboxClose(el) {
+      const handler = (e) => closeLightbox(e);
+      el.addEventListener('click', handler);
+      el.addEventListener('touchend', handler, { passive: false });
     }
 
     function bindImageActions(container) {
       container.querySelectorAll('[data-preview-url]').forEach((img) => {
-        img.addEventListener('click', () => openLightbox(img.dataset.previewUrl));
+        const open = (e) => {
+          if (Date.now() < lightboxSuppressUntil) {
+            e?.preventDefault?.();
+            e?.stopPropagation?.();
+            return;
+          }
+          openLightbox(img.dataset.previewUrl);
+        };
+        img.addEventListener('click', open);
       });
       container.querySelectorAll('[data-download-url]').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -2349,26 +2495,24 @@
       if (!baseUrl || !apiKey) throw new Error('请先在设置中填写 Base URL 和 API Key');
       if (!model) throw new Error('请选择模型');
 
-      const { url, extraHeaders } = resolveApiRequest(baseUrl);
       abortController = new AbortController();
 
       let response;
       try {
-        response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-          ...extraHeaders
-        },
-        body: JSON.stringify({
-          model: model.modelId,
-          messages: buildApiMessages(session),
-          stream: true,
-          ...getMaxTokensPayload()
-        }),
-        signal: abortController.signal
-      });
+        response = await apiFetch(baseUrl, 'chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: model.modelId,
+            messages: buildApiMessages(session),
+            stream: true,
+            ...getMaxTokensPayload()
+          }),
+          signal: abortController.signal
+        });
       } catch (err) {
         throw new Error(parseFetchError(err));
       }
@@ -2424,19 +2568,17 @@
       if (!baseUrl || !apiKey) throw new Error('请先在设置中填写 Base URL 和 API Key');
       if (!model) throw new Error('请选择生图模型');
 
-      const req = resolveImageRequestForMode(baseUrl, getConnectionMode(), state.settings.customProxyUrl);
       const size = state.settings.imageSize || '1024x1024';
       const count = Math.max(1, Math.min(4, parseInt(state.settings.imageCount, 10) || 1));
 
       async function postImage(payload) {
         let response;
         try {
-          response = await fetch(req.url, {
+          response = await apiFetch(baseUrl, 'image', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${apiKey}`,
-              ...req.extraHeaders
             },
             body: JSON.stringify(payload),
             signal: AbortSignal.timeout(180000)
@@ -3061,10 +3203,21 @@
       if (!isMobileView()) closeSidebar();
     });
 
-    document.getElementById('lightbox-close').addEventListener('click', closeLightbox);
+    function shouldIgnoreLightboxBackdrop(e) {
+      return !!e.target.closest('.lightbox-close-fab, #lightbox-close, #lightbox-download, .lightbox-inner');
+    }
+
+    bindLightboxClose(document.getElementById('lightbox-close'));
+    bindLightboxClose(document.getElementById('lightbox-close-fab'));
     document.getElementById('image-lightbox').addEventListener('click', (e) => {
-      if (e.target.id === 'image-lightbox') closeLightbox();
+      if (shouldIgnoreLightboxBackdrop(e)) return;
+      closeLightbox(e);
     });
+    document.getElementById('image-lightbox').addEventListener('touchend', (e) => {
+      if (shouldIgnoreLightboxBackdrop(e)) return;
+      e.preventDefault();
+      closeLightbox(e);
+    }, { passive: false });
     document.getElementById('lightbox-download').addEventListener('click', () => {
       if (currentPreviewImage) downloadImage(currentPreviewImage, `ai-image-${Date.now()}.png`);
     });

@@ -21,6 +21,9 @@ export default {
     }
 
     const url = new URL(request.url);
+    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+      return Response.json({ ok: true, service: 'chat-ai-proxy' }, { headers: cors });
+    }
     if (request.method !== 'POST') {
       return new Response('Not Found', { status: 404, headers: cors });
     }
