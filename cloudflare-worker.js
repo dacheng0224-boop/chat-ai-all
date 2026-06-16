@@ -38,9 +38,11 @@ export default {
     }
 
     const auth = request.headers.get('Authorization') || '';
+    // 生图通常比对话更慢，单独放宽超时
+    const timeoutMs = upstreamPath.includes('images') ? 300000 : 120000;
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort('UPSTREAM_TIMEOUT'), 120000);
+      const timeoutId = setTimeout(() => controller.abort('UPSTREAM_TIMEOUT'), timeoutMs);
       let upstream;
       try {
         upstream = await fetch(`${targetBase}${upstreamPath}`, {
@@ -63,12 +65,16 @@ export default {
 
       return new Response(upstream.body, { status: upstream.status, headers });
     } catch (e) {
-      if (e?.name === 'AbortError') {
+      const isTimeout =
+        e?.name === 'AbortError' ||
+        String(e?.message || '').includes('UPSTREAM_TIMEOUT');
+      if (isTimeout) {
+        const sec = Math.round(timeoutMs / 1000);
         return Response.json(
           {
             error: {
               message:
-                '自定义代理连接上游超时（120s）。通常是生图/长回复耗时较长或上游不通，请检查中转站连通性。',
+                `自定义代理连接上游超时（${sec}s）。生图模型可能更慢，请稍后重试；本地调试可改用 serve.rb 启动（超时更长）。`,
             },
           },
           { status: 504, headers: cors }
